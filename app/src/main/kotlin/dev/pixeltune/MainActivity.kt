@@ -90,7 +90,7 @@ fun App(status: Int, actions: List<Tweak>, toggles: List<Tweak>, packs: List<Twe
         }
         items(actions, key = { it.id }) { t ->
             Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { Text(t.title, style = MaterialTheme.typography.titleMedium); Text(t.desc, style = MaterialTheme.typography.bodySmall) }
+                Column(Modifier.weight(1f)) { Text(t.title, style = MaterialTheme.typography.titleMedium); Text(t.desc, style = MaterialTheme.typography.bodySmall); NoteText(t) }
                 FilledTonalButton(onClick = { run(t, true) }, enabled = canRun) { Text("Run") }
             }
         }
@@ -102,7 +102,7 @@ fun App(status: Int, actions: List<Tweak>, toggles: List<Tweak>, packs: List<Twe
                         Text(t.title, style = MaterialTheme.typography.titleMedium)
                         if (t.risky) Text("  RISKY", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                     }
-                    Text(t.desc, style = MaterialTheme.typography.bodySmall)
+                    Text(t.desc, style = MaterialTheme.typography.bodySmall); NoteText(t)
                 }
                 Switch(checked = on[t.id] == true, enabled = canRun, onCheckedChange = { v ->
                     if (v && t.risky) confirm = t else run(t, v)
@@ -122,9 +122,14 @@ fun App(status: Int, actions: List<Tweak>, toggles: List<Tweak>, packs: List<Twe
         AlertDialog(
             onDismissRequest = { confirm = null },
             title = { Text("Apply risky pack?") },
-            text = { Text("${t.title}: ${t.desc}\n\nThese can hurt battery life, background apps or notifications. You can revert any time.") },
+            text = { Text("${t.desc}\n\nNote: ${t.note}\n\nYou can switch it off any time to revert.") },
             confirmButton = { TextButton(onClick = { confirm = null; run(t, true) }) { Text("Apply") } },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } },
         )
     }
+}
+
+@Composable
+fun NoteText(t: Tweak) {
+    if (t.note.isNotBlank()) Text("Note: ${t.note}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
