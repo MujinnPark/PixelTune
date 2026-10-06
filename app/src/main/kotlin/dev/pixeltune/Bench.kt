@@ -25,7 +25,7 @@ object Bench {
             progress("Scroll test...")
             val x = w / 2; val y1 = (h * 0.75).toInt(); val y2 = (h * 0.25).toInt()
             Shell.run("am start -W -n $comp >/dev/null; sleep 2; dumpsys gfxinfo $pkg reset >/dev/null")
-            Shell.run("for i in 1 2 3 4 5 6 7 8; do input swipe $x $y1 $x $y2 250; sleep 0.3; input swipe $x $y2 $x $y1 250; sleep 0.3; done")
+            Shell.run("for i in 1 2 3 4 5 6; do input swipe $x $y1 $x $y2 300; sleep 1.5; input swipe $x $y2 $x $y1 300; sleep 1.5; done")
             val g = Shell.run("dumpsys gfxinfo $pkg")
             val frames = Regex("Total frames rendered:\\s*(\\d+)").find(g)?.groupValues?.get(1)?.toInt() ?: 0
             val jank = Regex("Janky frames:\\s*\\d+\\s*\\(([\\d.]+)%\\)").find(g)?.groupValues?.get(1)?.toFloat() ?: 0f

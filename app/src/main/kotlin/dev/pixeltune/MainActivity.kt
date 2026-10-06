@@ -308,8 +308,8 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                     Panel {
                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text("Smoothness test", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                            Text("Cold-starts the app 5 times, then scrolls it for about 15 seconds and counts dropped frames. " +
-                                "Keep the screen on and don't touch the phone (about 45 s). It swipes on screen, so use a harmless scrollable app like Settings.",
+                            Text("Cold-starts the app 5 times, then scrolls it for about 20 seconds and counts dropped frames. " +
+                                "Keep the screen on and don't touch the phone (about 50 s). It swipes on screen, so use a harmless scrollable app like Settings.",
                                 color = p.sub, fontSize = 13.sp)
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("App: $benchLabel", color = p.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
