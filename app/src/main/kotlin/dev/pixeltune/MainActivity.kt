@@ -129,6 +129,17 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     var benchLabel by remember { mutableStateOf(prefs.getString("bench_label", "Settings") ?: "Settings") }
     val results = remember { Bench.load(prefs).toMutableStateList() }
     val apps by produceState(emptyList<Pair<String, String>>()) { value = withContext(Dispatchers.IO) { Bench.launchableApps(ctx) } }
+    val userPkgs by produceState(emptySet<String>()) { value = withContext(Dispatchers.IO) { Bench.userPackages(ctx) } }
+    val sel = remember { (prefs.getString("aot_sel", "") ?: "").split(",").filter { it.isNotBlank() }.toMutableStateList() }
+    var showSelPicker by remember { mutableStateOf(false) }
+    var selQuery by remember { mutableStateOf("") }
+    var userOnly by remember { mutableStateOf(true) }
+    fun saveSel() { prefs.edit().putString("aot_sel", sel.joinToString(",")).apply() }
+    fun selTweak() = Tweak(
+        id = "aotsel", title = "Compile selected apps", desc = "",
+        apply = sel.map { "cmd package compile -m speed-profile $it" },
+        revert = sel.map { "cmd package compile --reset $it" }, action = true,
+    )
     val ver = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "" }
 
     suspend fun exec(t: Tweak, enable: Boolean) {
@@ -248,7 +259,8 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                     Text("Recommended = faster animations + Compile apps. Compile was the only tweak that measurably sped things up (about 17% faster cold start in WhatsApp). Re-run it after big app updates. Undo it from the Actions tab.",
                         color = p.sub, fontSize = 12.sp)
                 }
-                1 -> Panel {
+                1 -> {
+                Panel {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                         actions.forEachIndexed { i, t ->
                             if (i > 0) Hairline()
@@ -266,6 +278,27 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                             }
                         }
                     }
+                }
+                Panel {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Compile selected apps", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                        Text("Compiles only the apps you pick. Much faster than every package, and compile is the one tweak that measurably sped up launches. Re-run after those apps update.",
+                            color = p.sub, fontSize = 13.sp)
+                        val names = apps.associate { it.second to it.first }
+                        Text(if (sel.isEmpty()) "No apps chosen yet." else sel.joinToString(", ") { names[it] ?: it }, color = p.text, fontSize = 14.sp)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedButton(
+                                onClick = { showSelPicker = true }, enabled = canRun, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
+                                border = BorderStroke(1.dp, p.line), colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
+                            ) { Text("Choose apps") }
+                            Button(
+                                onClick = { run(selTweak(), true) }, enabled = canRun && sel.isNotEmpty(), modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
+                            ) { Text("Compile") }
+                        }
+                        if (sel.isNotEmpty()) TextButton(onClick = { run(selTweak(), false) }, enabled = canRun) { Text("Reset these apps", color = p.sub) }
+                    }
+                }
                 }
                 2 -> {
                     val std = packs.filter { !it.risky }
@@ -382,6 +415,34 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } },
         )
     }
+    if (showSelPicker) AlertDialog(
+        onDismissRequest = { showSelPicker = false },
+        title = { Text("Choose apps to compile") },
+        text = {
+            Column {
+                OutlinedTextField(value = selQuery, onValueChange = { selQuery = it }, singleLine = true,
+                    placeholder = { Text("Search") }, modifier = Modifier.fillMaxWidth())
+                Row(Modifier.fillMaxWidth().clickable { userOnly = !userOnly }, verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = userOnly, onCheckedChange = { userOnly = it }, colors = CheckboxDefaults.colors(checkedColor = p.blue))
+                    Text("User apps only", fontSize = 14.sp)
+                }
+                val shown = apps.filter { (l, pk) -> (!userOnly || pk in userPkgs) && l.contains(selQuery, ignoreCase = true) }
+                LazyColumn(Modifier.heightIn(max = 340.dp)) {
+                    items(shown, key = { it.second }) { (label, pkg) ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { if (pkg in sel) sel.remove(pkg) else sel.add(pkg); saveSel() },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(checked = pkg in sel, colors = CheckboxDefaults.colors(checkedColor = p.blue),
+                                onCheckedChange = { if (it) { if (pkg !in sel) sel.add(pkg) } else sel.remove(pkg); saveSel() })
+                            Text(label, fontSize = 15.sp)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { showSelPicker = false }) { Text("Done") } },
+    )
     if (showPicker) AlertDialog(
         onDismissRequest = { showPicker = false },
         title = { Text("Choose app") },

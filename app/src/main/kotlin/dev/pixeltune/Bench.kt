@@ -2,6 +2,7 @@ package dev.pixeltune
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.SharedPreferences
 
 data class BenchResult(
@@ -42,6 +43,15 @@ object Bench {
         val i = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         return pm.queryIntentActivities(i, 0).map { it.loadLabel(pm).toString() to it.activityInfo.packageName }
             .distinctBy { it.second }.sortedBy { it.first.lowercase() }
+    }
+
+    /** Launchable packages that were installed by the user (or are updated system apps like Chrome). */
+    fun userPackages(ctx: Context): Set<String> {
+        val i = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        return ctx.packageManager.queryIntentActivities(i, 0).filter {
+            val fl = it.activityInfo.applicationInfo.flags
+            (fl and ApplicationInfo.FLAG_SYSTEM) == 0 || (fl and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+        }.map { it.activityInfo.packageName }.toSet()
     }
 
     fun load(prefs: SharedPreferences): List<BenchResult> =
