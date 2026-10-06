@@ -14,12 +14,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import rikka.shizuku.Shizuku
 
 class MainActivity : ComponentActivity() {
@@ -54,6 +58,8 @@ fun App(status: Int, actions: List<Tweak>, toggles: List<Tweak>, packs: List<Twe
     var busy by remember { mutableStateOf(false) }
     var log by remember { mutableStateOf("Nothing run yet.") }
     var confirm by remember { mutableStateOf<Tweak?>(null) }
+    val ctx = LocalContext.current
+    var keepNotif by remember { mutableStateOf(prefs.getBoolean("keep_notif", true)) }
     val on = remember {
         mutableStateMapOf<String, Boolean>().also { m -> (toggles + packs).forEach { m[it.id] = prefs.getBoolean(it.id, false) } }
     }
@@ -62,12 +68,34 @@ fun App(status: Int, actions: List<Tweak>, toggles: List<Tweak>, packs: List<Twe
     fun run(t: Tweak, enable: Boolean) {
         scope.launch {
             busy = true
-            val cmds = if (enable) t.apply else t.revert
-            val (n, out) = withContext(Dispatchers.IO) {
-                runCatching { Shell.runAll(cmds) }.getOrElse { 0 to "Failed: ${it.message}" }
+            val all = if (enable) t.apply else t.revert
+            val skipped = if (enable && keepNotif) all.filter { Tweaks.touchesNotifications(it) } else emptyList()
+            val cmds = all - skipped.toSet()
+            log = "Running ${t.title}... this can take a few minutes."
+            val r = withContext(Dispatchers.IO) {
+                runCatching { Shell.runAll(cmds) }.getOrElse { ShellResult(0, listOf("Failed: ${it.message}"), "") }
             }
             if (!t.action) { on[t.id] = enable; prefs.edit().putBoolean(t.id, enable).apply() }
-            log = "${t.title}: ${if (enable) "applied" else "reverted"} (${cmds.size} commands, $n message lines)\n$out"
+            val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+            val saved = withContext(Dispatchers.IO) {
+                LogStore.save(ctx, "pixeltune_${t.id}_$stamp.txt", buildString {
+                    append("PixelTune log: ${t.title} (${if (enable) "apply" else "revert"}) $stamp\n")
+                    append("Sent ${cmds.size} command(s), skipped ${skipped.size} (notification guard)\n\n")
+                    if (skipped.isNotEmpty()) { append("Skipped:\n"); skipped.forEach { append(it).append('\n') }; append('\n') }
+                    append("Commands:\n"); cmds.forEach { append(it).append('\n') }
+                    append("\nFull output:\n").append(r.raw)
+                })
+            }
+            log = buildString {
+                append("${t.title}: ${if (enable) "applied" else "reverted"}\n")
+                append("${cmds.size} command(s) sent")
+                if (skipped.isNotEmpty()) append(" · ${skipped.size} skipped to keep notifications")
+                if (r.ok > 0) append(" · ${r.ok} packages OK")
+                append(" · ${r.other.size} other message(s)")
+                r.other.take(10).forEach { append("\n$it") }
+                if (r.other.size > 10) append("\n...and ${r.other.size - 10} more")
+                append(if (saved != null) "\nFull log saved: $saved" else "\nCould not save the log file.")
+            }
             busy = false
         }
     }
@@ -85,6 +113,13 @@ fun App(status: Int, actions: List<Tweak>, toggles: List<Tweak>, packs: List<Twe
                     if (status == 1) Button(onClick = { runCatching { Shizuku.requestPermission(1) } }, modifier = Modifier.padding(top = 8.dp)) { Text("Grant access") }
                     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
                 }
+            }
+            Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Keep notifications untouched", style = MaterialTheme.typography.titleMedium)
+                    Text("Skips tweaks that change notification features (history, smart notifications, message warnings) and standby limits.", style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(checked = keepNotif, onCheckedChange = { keepNotif = it; prefs.edit().putBoolean("keep_notif", it).apply() })
             }
             Text("Actions", style = MaterialTheme.typography.titleLarge)
         }

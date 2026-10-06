@@ -10,10 +10,17 @@ data class Tweak(
 )
 
 object Tweaks {
+    private val GUARD = Regex("(?i)notif|push_messaging|messagearmour|app_standby|background_(check|execution|restrictions)|app_restriction|restricted_device")
+    /** True for commands that touch notification features or background limits. */
+    fun touchesNotifications(cmd: String) = GUARD.containsMatchIn(cmd)
+
     fun actions() = listOf(
-        Tweak("aot", "Compile apps (speed-profile)", "Gets apps ready ahead of time so they open faster.",
-            "Takes a few minutes and uses some battery while it runs.",
+        Tweak("aot", "Compile apps (speed-profile)", "Pre-compiles apps so they open faster. Skips apps that are already optimized.",
+            "Often finishes in seconds because Pixel already does this overnight.",
             listOf("cmd package compile -m speed-profile -a"), action = true),
+        Tweak("aotf", "Force recompile (slow)", "Recompiles every app even if already optimized.",
+            "Takes several minutes and uses battery. Gains are usually small.",
+            listOf("cmd package compile -m speed-profile -f -a"), action = true),
         Tweak("bgdex", "Run background dexopt now", "Starts the system's tidy-up job now instead of waiting for night.",
             "Runs in the background for a while.",
             listOf("cmd package bg-dexopt-job"), action = true),

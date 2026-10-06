@@ -25,14 +25,24 @@ object Shell {
         return out.trim()
     }
 
-    /** Runs commands in batches; returns (message line count, trimmed output). */
-    fun runAll(cmds: List<String>, chunk: Int = 60): Pair<Int, String> {
-        var n = 0
-        val sb = StringBuilder()
+    /** Runs commands in batches. Lines ending in "Success" count as OK; anything else is a message. */
+    fun runAll(cmds: List<String>, chunk: Int = 60): ShellResult {
+        var ok = 0
+        val other = mutableListOf<String>()
+        val raw = StringBuilder()
         for (batch in cmds.chunked(chunk)) {
-            val o = run(batch.joinToString("\n"))
-            if (o.isNotBlank()) { n += o.lines().size; sb.appendLine(o.take(300)) }
+            val out = run(batch.joinToString("\n"))
+            raw.append(out).append('\n')
+            for (line in out.lines()) {
+                when {
+                    line.isBlank() -> {}
+                    line.trimEnd().endsWith("Success") -> ok++
+                    else -> other += line.take(200)
+                }
+            }
         }
-        return n to sb.toString().take(2000)
+        return ShellResult(ok, other, raw.toString())
     }
 }
+
+data class ShellResult(val ok: Int, val other: List<String>, val raw: String)
