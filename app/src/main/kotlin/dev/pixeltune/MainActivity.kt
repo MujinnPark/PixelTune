@@ -326,8 +326,9 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                         val prev = results.drop(i + 1).firstOrNull { it.pkg == r.pkg }
                         val dS = prev?.let { r.medianMs - it.medianMs } ?: 0
                         val dJ = prev?.let { r.jankPct - it.jankPct } ?: 0f
-                        val better = prev != null && (dS <= -prev.medianMs * 0.05 || dJ <= -1f)
-                        val worse = prev != null && (dS >= prev.medianMs * 0.05 || dJ >= 1f)
+                        val gate = prev?.let { maxOf(it.medianMs * 0.10, 20.0) } ?: 0.0
+                        val better = prev != null && (dS <= -gate || dJ <= -3f)
+                        val worse = prev != null && (dS >= gate || dJ >= 3f)
                         val label = when {
                             prev == null -> "Baseline"
                             better && worse -> "Mixed"
@@ -344,7 +345,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                                 (prev?.let { "\nvs previous: ${"%+d".format(dS)} ms start, ${"%+.1f".format(dJ)} pt jank" } ?: ""),
                         )
                     }
-                    if (results.size >= 2) Text("Differences under 5-10% are normal noise. Run twice before trusting a change.", color = p.sub, fontSize = 12.sp)
+                    if (results.size >= 2) Text("Changes under about 10% (or 20 ms, or 3 points of jank) are treated as noise.", color = p.sub, fontSize = 12.sp)
                     if (results.isNotEmpty()) OutlinedButton(
                         onClick = { results.clear(); Bench.save(prefs, results) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
                         border = BorderStroke(1.dp, p.line), colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
