@@ -1,6 +1,15 @@
 package dev.pixeltune
 
+import android.app.ActivityManager
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.os.BatteryManager
+import android.os.Environment
+import android.os.StatFs
+import android.text.format.Formatter
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import android.hardware.display.DisplayManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -112,6 +121,14 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     val riskyOn = packs.count { it.risky && on[it.id] == true }
     val recommended = (toggles + packs).filter { it.id in setOf("anim", "settings_std", "device_config_std") }
     val recOn = recommended.all { on[it.id] == true }
+    var statsTick by remember { mutableIntStateOf(0) }
+    var benching by remember { mutableStateOf(false) }
+    var benchMsg by remember { mutableStateOf("") }
+    var showPicker by remember { mutableStateOf(false) }
+    var benchPkg by remember { mutableStateOf(prefs.getString("bench_pkg", "com.android.settings") ?: "com.android.settings") }
+    var benchLabel by remember { mutableStateOf(prefs.getString("bench_label", "Settings") ?: "Settings") }
+    val results = remember { Bench.load(prefs).toMutableStateList() }
+    val apps by produceState(emptyList<Pair<String, String>>()) { value = withContext(Dispatchers.IO) { Bench.launchableApps(ctx) } }
     val ver = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "" }
 
     suspend fun exec(t: Tweak, enable: Boolean) {
@@ -163,6 +180,22 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     }
     fun runMany(list: List<Pair<Tweak, Boolean>>) {
         scope.launch { busy = true; list.forEach { (t, e) -> exec(t, e) }; busy = false }
+    }
+    fun runBench() {
+        scope.launch {
+            busy = true; benching = true; benchMsg = "Starting..."
+            val dm = ctx.resources.displayMetrics
+            val comp = ctx.packageManager.getLaunchIntentForPackage(benchPkg)?.component?.flattenToShortString()
+            val r = withContext(Dispatchers.IO) {
+                if (comp == null) Result.failure<BenchResult>(IllegalStateException("$benchLabel has no launcher activity"))
+                else Bench.run(benchPkg, benchLabel, comp, ctx.packageName, activeOn, dm.widthPixels, dm.heightPixels) { benchMsg = it }
+            }
+            r.onSuccess {
+                results.add(0, it); Bench.save(prefs, results)
+                benchMsg = if (it.frames < 50) "Only ${it.frames} frames rendered. Pick a scrollable app (Settings, Chrome)." else "Done."
+            }.onFailure { benchMsg = "Failed: ${it.message}" }
+            benching = false; busy = false
+        }
     }
     fun isOpen(k: String, def: Boolean) = open[k] ?: def
 
@@ -251,6 +284,72 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                         risky.forEachIndexed { i, t -> if (i > 0) Hairline(); ToggleRow(t, on[t.id] == true, canRun) { onToggle(t, it) } }
                     }
                 }
+                3 -> {
+                    val tick = statsTick
+                    val am = ctx.getSystemService(ActivityManager::class.java)
+                    val mi = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+                    val sf = StatFs(Environment.getDataDirectory().path)
+                    val bat = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                    val tempC = (bat?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0) / 10f
+                    val lvl = bat?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+                    Panel {
+                        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Phone status", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                                IconButton(onClick = { statsTick = tick + 1 }) { Icon(Icons.Filled.Refresh, "Refresh", tint = p.sub) }
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                Stat(Formatter.formatShortFileSize(ctx, mi.availMem), "RAM free")
+                                Stat(Formatter.formatShortFileSize(ctx, sf.availableBytes), "Storage free")
+                                Stat(String.format("%.1f°C", tempC), "Battery $lvl%")
+                            }
+                        }
+                    }
+                    Panel {
+                        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Smoothness test", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                            Text("Cold-starts the app 5 times, then scrolls it for about 15 seconds and counts dropped frames. " +
+                                "Keep the screen on and don't touch the phone (about 45 s). It swipes on screen, so use a harmless scrollable app like Settings.",
+                                color = p.sub, fontSize = 13.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("App: $benchLabel", color = p.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                                TextButton(onClick = { showPicker = true }, enabled = canRun) { Text("Change", color = p.blue) }
+                            }
+                            Button(
+                                onClick = { runBench() }, enabled = canRun, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
+                            ) { Text(if (benching) benchMsg else "Run test") }
+                            if (!benching && benchMsg.isNotBlank()) Text(benchMsg, color = p.sub, fontSize = 12.sp)
+                        }
+                    }
+                    results.forEachIndexed { i, r ->
+                        val prev = results.drop(i + 1).firstOrNull { it.pkg == r.pkg }
+                        val dS = prev?.let { r.medianMs - it.medianMs } ?: 0
+                        val dJ = prev?.let { r.jankPct - it.jankPct } ?: 0f
+                        val better = prev != null && (dS <= -prev.medianMs * 0.05 || dJ <= -1f)
+                        val worse = prev != null && (dS >= prev.medianMs * 0.05 || dJ >= 1f)
+                        val label = when {
+                            prev == null -> "Baseline"
+                            better && worse -> "Mixed"
+                            better -> "Better"
+                            worse -> "Worse"
+                            else -> "No clear change"
+                        }
+                        val col = when (label) { "Better" -> Green; "Worse" -> p.red; "Mixed" -> p.amber; else -> p.sub }
+                        val mins = ((System.currentTimeMillis() - r.ts) / 60000).toInt()
+                        IssueCard(
+                            label, col, if (label == "Worse") p.redBg else p.card, if (mins < 1) "Just now" else "$mins min ago",
+                            "${r.label}: ${r.medianMs} ms start · ${"%.1f".format(r.jankPct)}% jank",
+                            "${r.tweaksOn} tweaks on · start ${r.minMs}-${r.maxMs} ms · ${r.frames} frames · 90th pct ${r.p90} ms" +
+                                (prev?.let { "\nvs previous: ${"%+d".format(dS)} ms start, ${"%+.1f".format(dJ)} pt jank" } ?: ""),
+                        )
+                    }
+                    if (results.size >= 2) Text("Differences under 5-10% are normal noise. Run twice before trusting a change.", color = p.sub, fontSize = 12.sp)
+                    if (results.isNotEmpty()) OutlinedButton(
+                        onClick = { results.clear(); Bench.save(prefs, results) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, p.line), colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
+                    ) { Text("Clear results") }
+                }
                 else -> {
                     if (history.isEmpty()) IssueCard("Nothing yet", p.sub, p.card, "", "No runs this session", "Run an action or switch a tweak on. Full logs are saved to Download/PixelTune.")
                     history.forEach { e ->
@@ -282,6 +381,22 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } },
         )
     }
+    if (showPicker) AlertDialog(
+        onDismissRequest = { showPicker = false },
+        title = { Text("Choose app") },
+        text = {
+            LazyColumn(Modifier.heightIn(max = 400.dp)) {
+                items(apps, key = { it.second }) { (label, pkg) ->
+                    Text(label, Modifier.fillMaxWidth().clickable {
+                        benchPkg = pkg; benchLabel = label
+                        prefs.edit().putString("bench_pkg", pkg).putString("bench_label", label).apply()
+                        showPicker = false
+                    }.padding(vertical = 12.dp), fontSize = 16.sp)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { showPicker = false }) { Text("Close") } },
+    )
     if (showSettings) AlertDialog(
         onDismissRequest = { showSettings = false },
         title = { Text("Settings") },
@@ -425,16 +540,16 @@ private fun Ring(frac: Float, big: String, small: String) {
 @Composable
 private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
     val p = LocalPal.current
-    val items = listOf("Home" to Icons.Filled.Home, "Actions" to Icons.Filled.PlayArrow, "Tweaks" to Icons.Filled.Build, "Log" to Icons.Filled.Info)
+    val tabs = listOf("Home" to Icons.Filled.Home, "Actions" to Icons.Filled.PlayArrow, "Tweaks" to Icons.Filled.Build, "Measure" to Icons.Filled.Search, "Log" to Icons.Filled.Info)
     val dim = Color(0xFF6B7280)
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(p.navy)
             .navigationBarsPadding().padding(top = 12.dp, bottom = 10.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
-        items.forEachIndexed { i, (label, icon) ->
+        tabs.forEachIndexed { i, (label, icon) ->
             val c = if (i == selected) Color.White else dim
-            Column(Modifier.clip(RoundedCornerShape(16.dp)).clickable { onSelect(i) }.padding(horizontal = 14.dp, vertical = 4.dp),
+            Column(Modifier.clip(RoundedCornerShape(16.dp)).clickable { onSelect(i) }.padding(horizontal = 9.dp, vertical = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(icon, label, tint = c, modifier = Modifier.size(26.dp))
                 Text(label, fontSize = 11.sp, color = c)
