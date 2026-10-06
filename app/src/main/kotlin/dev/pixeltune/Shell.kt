@@ -25,24 +25,31 @@ object Shell {
         return out.trim()
     }
 
-    /** Runs commands in batches. Lines ending in "Success" count as OK; anything else is a message. */
+    /**
+     * Runs commands in batches. "Success" lines count as OK, "Exception occurred" counts as one rejected command,
+     * stack frames are dropped, and anything else is kept as a message.
+     */
     fun runAll(cmds: List<String>, chunk: Int = 60): ShellResult {
         var ok = 0
+        var failed = 0
         val other = mutableListOf<String>()
         val raw = StringBuilder()
         for (batch in cmds.chunked(chunk)) {
-            val out = run(batch.joinToString("\n"))
-            raw.append(out).append('\n')
-            for (line in out.lines()) {
+            for (line in run(batch.joinToString("\n")).lines()) {
                 when {
-                    line.isBlank() -> {}
-                    line.trimEnd().endsWith("Success") -> ok++
-                    else -> other += line.take(200)
+                    line.isBlank() || line.startsWith("\tat ") || line.startsWith("\t...") || line.startsWith("Caused by") -> {}
+                    line.startsWith("Exception occurred while executing") -> failed++
+                    line.contains("SecurityException") -> {
+                        val flag = Regex("'([^']+)'").find(line)?.groupValues?.get(1) ?: line.take(120)
+                        raw.append("REJECTED: ").append(flag).append('\n')
+                    }
+                    line.trimEnd().endsWith("Success") -> { ok++; raw.append(line).append('\n') }
+                    else -> { other += line.take(200); raw.append(line).append('\n') }
                 }
             }
         }
-        return ShellResult(ok, other, raw.toString())
+        return ShellResult(ok, failed, other, raw.toString())
     }
 }
 
-data class ShellResult(val ok: Int, val other: List<String>, val raw: String)
+data class ShellResult(val ok: Int, val failed: Int, val other: List<String>, val raw: String)

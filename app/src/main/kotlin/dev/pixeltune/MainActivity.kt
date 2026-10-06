@@ -73,9 +73,12 @@ fun App(status: Int, actions: List<Tweak>, toggles: List<Tweak>, packs: List<Twe
             val cmds = all - skipped.toSet()
             log = "Running ${t.title}... this can take a few minutes."
             val r = withContext(Dispatchers.IO) {
-                runCatching { Shell.runAll(cmds) }.getOrElse { ShellResult(0, listOf("Failed: ${it.message}"), "") }
+                runCatching { Shell.runAll(cmds) }.getOrElse { ShellResult(0, 0, listOf("Failed: ${it.message}"), "") }
             }
-            if (!t.action) { on[t.id] = enable; prefs.edit().putBoolean(t.id, enable).apply() }
+            if (!t.action) {
+                val applied = enable && r.failed < cmds.size
+                on[t.id] = applied; prefs.edit().putBoolean(t.id, applied).apply()
+            }
             val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
             val saved = withContext(Dispatchers.IO) {
                 LogStore.save(ctx, "pixeltune_${t.id}_$stamp.txt", buildString {
@@ -91,6 +94,7 @@ fun App(status: Int, actions: List<Tweak>, toggles: List<Tweak>, packs: List<Twe
                 append("${cmds.size} command(s) sent")
                 if (skipped.isNotEmpty()) append(" · ${skipped.size} skipped to keep notifications")
                 if (r.ok > 0) append(" · ${r.ok} packages OK")
+                if (r.failed > 0) append(" · ${r.failed} rejected by Android" + if (r.ok == 0) " (${(cmds.size - r.failed).coerceAtLeast(0)} accepted)" else "")
                 append(" · ${r.other.size} other message(s)")
                 r.other.take(10).forEach { append("\n$it") }
                 if (r.other.size > 10) append("\n...and ${r.other.size - 10} more")
