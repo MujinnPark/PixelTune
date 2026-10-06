@@ -119,8 +119,8 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     val activeOn = on.values.count { it }
     val total = on.size
     val riskyOn = packs.count { it.risky && on[it.id] == true }
-    val recommended = (toggles + packs).filter { it.id in setOf("anim", "settings_std", "device_config_std") }
-    val recOn = recommended.all { on[it.id] == true }
+    val animTweak = toggles.firstOrNull { it.id == "anim" }
+    val aotAction = actions.firstOrNull { it.id == "aot" }
     var statsTick by remember { mutableIntStateOf(0) }
     var benching by remember { mutableStateOf(false) }
     var benchMsg by remember { mutableStateOf("") }
@@ -240,12 +240,12 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                             border = BorderStroke(1.dp, p.line), colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
                         ) { Text("Turn all off") }
                         Button(
-                            onClick = { runMany(recommended.filter { on[it.id] != true }.map { it to true }) },
-                            enabled = canRun && !recOn, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
+                            onClick = { runMany(listOfNotNull(animTweak?.takeIf { on[it.id] != true }?.let { it to true }, aotAction?.let { it to true })) },
+                            enabled = canRun, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
-                        ) { Text(if (recOn) "Recommended on" else "Apply recommended") }
+                        ) { Text("Apply recommended") }
                     }
-                    Text("Recommended = faster animations, the settings pack and the ads/hibernation/storage flags. 120 Hz and risky packs stay off.",
+                    Text("Recommended = faster animations + Compile apps. Compile was the only tweak that measurably sped things up (about 17% faster cold start in WhatsApp). Re-run it after big app updates. Undo it from the Actions tab.",
                         color = p.sub, fontSize = 12.sp)
                 }
                 1 -> Panel {
@@ -275,7 +275,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                         badges = { CountChip(toggles.count { on[it.id] == true }, p.amber, Color.Black) }) {
                         toggles.forEachIndexed { i, t -> if (i > 0) Hairline(); ToggleRow(t, on[t.id] == true, canRun) { onToggle(t, it) } }
                     }
-                    Accordion("Cleanup packs", Icons.Filled.Build, isOpen("c", false), { open["c"] = !isOpen("c", false) },
+                    Accordion("Cleanup & privacy packs", Icons.Filled.Build, isOpen("c", false), { open["c"] = !isOpen("c", false) },
                         badges = { CountChip(std.count { on[it.id] == true }, p.amber, Color.Black) }) {
                         std.forEachIndexed { i, t -> if (i > 0) Hairline(); ToggleRow(t, on[t.id] == true, canRun) { onToggle(t, it) } }
                     }
