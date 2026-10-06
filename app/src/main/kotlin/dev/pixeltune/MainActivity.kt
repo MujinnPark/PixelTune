@@ -110,11 +110,11 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     val activeOn = on.values.count { it }
     val total = on.size
     val riskyOn = packs.count { it.risky && on[it.id] == true }
+    val recommended = (toggles + packs).filter { it.id in setOf("anim", "settings_std", "device_config_std") }
+    val recOn = recommended.all { on[it.id] == true }
     val ver = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "" }
 
-    fun run(t: Tweak, enable: Boolean) {
-        scope.launch {
-            busy = true
+    suspend fun exec(t: Tweak, enable: Boolean) {
             val all = if (enable) t.apply else t.revert
             val skipped = if (enable && keepNotif) all.filter { Tweaks.touchesNotifications(it) } else emptyList()
             val cmds = all - skipped.toSet()
@@ -137,7 +137,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
             }
             val level = when {
                 cmds.isNotEmpty() && r.failed >= cmds.size -> 2
-                r.failed > 0 || r.other.isNotEmpty() -> 1
+                r.failed > 0 || r.other.any { Regex("(?i)exception|error|fail|denied|not found").containsMatchIn(it) } -> 1
                 else -> 0
             }
             val label = when {
@@ -157,8 +157,12 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                 append(if (saved != null) "\nLog: $saved" else "\nCould not save the log file.")
             }
             history.add(0, Entry(t.title, System.currentTimeMillis(), level, label, summary))
-            busy = false
-        }
+    }
+    fun run(t: Tweak, enable: Boolean) {
+        scope.launch { busy = true; exec(t, enable); busy = false }
+    }
+    fun runMany(list: List<Pair<Tweak, Boolean>>) {
+        scope.launch { busy = true; list.forEach { (t, e) -> exec(t, e) }; busy = false }
     }
     fun isOpen(k: String, def: Boolean) = open[k] ?: def
 
@@ -182,7 +186,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                         if (status == 1) Button(
                             onClick = { runCatching { Shizuku.requestPermission(1) } },
                             modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = p.blue),
+                            colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
                         ) { Text("Grant access") }
                     }
                     Panel {
@@ -198,16 +202,18 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedButton(
-                            onClick = { actions.firstOrNull { it.id == "reset" }?.let { run(it, true) } },
-                            enabled = canRun, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
+                            onClick = { runMany((toggles + packs).filter { on[it.id] == true }.map { it to false }) },
+                            enabled = canRun && activeOn > 0, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
                             border = BorderStroke(1.dp, p.line), colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
-                        ) { Text("Undo compile") }
+                        ) { Text("Turn all off") }
                         Button(
-                            onClick = { actions.firstOrNull { it.id == "aot" }?.let { run(it, true) } },
-                            enabled = canRun, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = p.blue),
-                        ) { Text("Quick compile") }
+                            onClick = { runMany(recommended.filter { on[it.id] != true }.map { it to true }) },
+                            enabled = canRun && !recOn, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
+                        ) { Text(if (recOn) "Recommended on" else "Apply recommended") }
                     }
+                    Text("Recommended = faster animations, the settings pack and the ads/hibernation/storage flags. 120 Hz and risky packs stay off.",
+                        color = p.sub, fontSize = 12.sp)
                 }
                 1 -> Panel {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
@@ -221,7 +227,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                                 }
                                 Button(
                                     onClick = { run(t, true) }, enabled = canRun, shape = RoundedCornerShape(50),
-                                    colors = ButtonDefaults.buttonColors(containerColor = p.blue),
+                                    colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
                                     contentPadding = PaddingValues(horizontal = 18.dp),
                                 ) { Text("Run") }
                             }
