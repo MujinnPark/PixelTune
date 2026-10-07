@@ -135,6 +135,22 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     var selQuery by remember { mutableStateOf("") }
     var userOnly by remember { mutableStateOf(true) }
     fun saveSel() { prefs.edit().putString("aot_sel", sel.joinToString(",")).apply() }
+    val gsel = remember { (prefs.getString("game_sel", "") ?: "").split(",").filter { it.isNotBlank() }.toMutableStateList() }
+    var gmode by remember { mutableStateOf(prefs.getString("game_mode", "performance") ?: "performance") }
+    var pickGames by remember { mutableStateOf(false) }
+    fun gameTweak(kind: String) = Tweak(
+        id = "game_$kind",
+        title = when (kind) { "set" -> "Game mode: $gmode"; "reset" -> "Game mode reset"; else -> "Game mode check" },
+        desc = "",
+        apply = gsel.map {
+            when (kind) {
+                "set" -> "cmd game set --mode $gmode $it"
+                "reset" -> "cmd game reset $it"
+                else -> "cmd game list-modes $it; cmd game mode $it"
+            }
+        },
+        action = true,
+    )
     fun selTweak() = Tweak(
         id = "aotsel", title = "Compile selected apps", desc = "",
         apply = sel.map { "cmd package compile -m speed-profile $it" },
@@ -185,7 +201,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                     else " · ${r.failed} were never set, nothing to remove"
                 )
                 if (r.other.isNotEmpty()) append(" · ${r.other.size} other message(s)")
-                r.other.take(3).forEach { append("\n$it") }
+                r.other.take(if (t.id == "game_check") 24 else 3).forEach { append("\n$it") }
                 append(if (saved != null) "\nLog: $saved" else "\nCould not save the log file.")
             }
             history.add(0, Entry(t.title, System.currentTimeMillis(), level, label, summary))
@@ -292,7 +308,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                         Text(if (sel.isEmpty()) "No apps chosen yet." else sel.joinToString(", ") { names[it] ?: it }, color = p.text, fontSize = 14.sp)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             OutlinedButton(
-                                onClick = { showSelPicker = true }, enabled = canRun, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
+                                onClick = { pickGames = false; showSelPicker = true }, enabled = canRun, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
                                 border = BorderStroke(1.dp, p.line), colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
                             ) { Text("Choose apps") }
                             Button(
@@ -301,6 +317,40 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                             ) { Text("Compile") }
                         }
                         if (sel.isNotEmpty()) TextButton(onClick = { run(selTweak(), false) }, enabled = canRun) { Text("Reset these apps", color = p.sub) }
+                    }
+                }
+                Panel {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Game mode", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                        Text("Sets Android's per-game mode. It only does something for games that support it, so run Check modes first. Performance mode can add heat and battery drain.",
+                            color = p.sub, fontSize = 13.sp)
+                        val gnames = apps.associate { it.second to it.first }
+                        Text(if (gsel.isEmpty()) "No games chosen yet." else gsel.joinToString(", ") { gnames[it] ?: it }, color = p.text, fontSize = 14.sp)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("performance", "battery", "standard").forEach { mode ->
+                                Text(mode.replaceFirstChar { it.uppercase() }, fontSize = 13.sp,
+                                    color = if (gmode == mode) Color.White else p.text,
+                                    modifier = Modifier.clip(RoundedCornerShape(50))
+                                        .background(if (gmode == mode) p.blue else p.line)
+                                        .clickable { gmode = mode; prefs.edit().putString("game_mode", mode).apply() }
+                                        .padding(horizontal = 14.dp, vertical = 8.dp))
+                            }
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedButton(
+                                onClick = { pickGames = true; showSelPicker = true }, enabled = canRun, modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, p.line),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
+                            ) { Text("Choose games") }
+                            Button(
+                                onClick = { run(gameTweak("set"), true) }, enabled = canRun && gsel.isNotEmpty(), modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
+                            ) { Text("Set mode") }
+                        }
+                        if (gsel.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(onClick = { run(gameTweak("check"), true) }, enabled = canRun) { Text("Check modes", color = p.blue) }
+                            TextButton(onClick = { run(gameTweak("reset"), true) }, enabled = canRun) { Text("Reset", color = p.sub) }
+                        }
                     }
                 }
                 }
@@ -421,7 +471,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     }
     if (showSelPicker) AlertDialog(
         onDismissRequest = { showSelPicker = false },
-        title = { Text("Choose apps to compile") },
+        title = { Text(if (pickGames) "Choose games" else "Choose apps to compile") },
         text = {
             Column {
                 OutlinedTextField(value = selQuery, onValueChange = { selQuery = it }, singleLine = true,
@@ -430,15 +480,17 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                     Checkbox(checked = userOnly, onCheckedChange = { userOnly = it }, colors = CheckboxDefaults.colors(checkedColor = p.blue))
                     Text("User apps only", fontSize = 14.sp)
                 }
+                val target = if (pickGames) gsel else sel
+                fun saveTarget() { prefs.edit().putString(if (pickGames) "game_sel" else "aot_sel", target.joinToString(",")).apply() }
                 val shown = apps.filter { (l, pk) -> (!userOnly || pk in userPkgs) && l.contains(selQuery, ignoreCase = true) }
                 LazyColumn(Modifier.heightIn(max = 340.dp)) {
                     items(shown, key = { it.second }) { (label, pkg) ->
                         Row(
-                            Modifier.fillMaxWidth().clickable { if (pkg in sel) sel.remove(pkg) else sel.add(pkg); saveSel() },
+                            Modifier.fillMaxWidth().clickable { if (pkg in target) target.remove(pkg) else target.add(pkg); saveTarget() },
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Checkbox(checked = pkg in sel, colors = CheckboxDefaults.colors(checkedColor = p.blue),
-                                onCheckedChange = { if (it) { if (pkg !in sel) sel.add(pkg) } else sel.remove(pkg); saveSel() })
+                            Checkbox(checked = pkg in target, colors = CheckboxDefaults.colors(checkedColor = p.blue),
+                                onCheckedChange = { if (it) { if (pkg !in target) target.add(pkg) } else target.remove(pkg); saveTarget() })
                             Text(label, fontSize = 15.sp)
                         }
                     }
