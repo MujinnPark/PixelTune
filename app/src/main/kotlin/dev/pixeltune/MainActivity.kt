@@ -144,9 +144,13 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
         desc = "",
         apply = gsel.map {
             when (kind) {
-                "set" -> "cmd game set --mode $gmode $it"
+                "set" -> {
+                    val n = when (gmode) { "performance" -> 2; "battery" -> 3; else -> 1 }
+                    "if cmd game list-modes $it | grep -q $gmode; then cmd game set --mode $n $it && echo '$it: set to $gmode'; " +
+                        "else echo '$it: $gmode not supported, skipped'; fi"
+                }
                 "reset" -> "cmd game reset $it"
-                else -> "cmd game list-modes $it; cmd game mode $it"
+                else -> "cmd game list-modes $it"
             }
         },
         action = true,
@@ -182,7 +186,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
             val fails = if (enable) r.failed else 0 // reverting flags that were never set is expected to be rejected
             val level = when {
                 cmds.isNotEmpty() && fails >= cmds.size -> 2
-                fails > 0 || r.other.any { Regex("(?i)exception|error|fail|denied|not found").containsMatchIn(it) } -> 1
+                fails > 0 || r.other.any { Regex("(?i)exception|error|fail|denied|not found|not supported").containsMatchIn(it) } -> 1
                 else -> 0
             }
             val label = when {
@@ -201,7 +205,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                     else " · ${r.failed} were never set, nothing to remove"
                 )
                 if (r.other.isNotEmpty()) append(" · ${r.other.size} other message(s)")
-                r.other.take(if (t.id == "game_check") 24 else 3).forEach { append("\n$it") }
+                r.other.take(if (t.id.startsWith("game_")) 24 else 3).forEach { append("\n$it") }
                 append(if (saved != null) "\nLog: $saved" else "\nCould not save the log file.")
             }
             history.add(0, Entry(t.title, System.currentTimeMillis(), level, label, summary))
