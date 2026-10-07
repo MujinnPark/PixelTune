@@ -79,6 +79,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.PI
@@ -273,6 +274,50 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
             benching = false; busy = false
         }
     }
+    fun runVerify() {
+        scope.launch {
+            busy = true
+            val names = apps.associate { it.second to it.first }
+            val onTweaks = (toggles + packs).filter { on[it.id] == true }
+            val chosen = sel.toList()
+            val guard = keepNotif
+            val report = withContext(Dispatchers.IO) {
+                val lines = mutableListOf<String>()
+                val full = StringBuilder()
+                var total = 0
+                var matched = 0
+                onTweaks.forEach { t ->
+                    val r = Verify.check(t.apply.filter { !(guard && Tweaks.touchesNotifications(it)) })
+                    total += r.total; matched += r.matched
+                    lines += "${t.title}: ${r.matched}/${r.total} match"
+                    r.bad.take(3).forEach { lines += "  - $it" }
+                    r.bad.forEach { full.append(t.title).append(": ").append(it).append('\n') }
+                }
+                chosen.forEach { pk -> lines += "${names[pk] ?: pk}: compiled ${Verify.compileStatus(pk)}" }
+                Triple(lines, total to matched, full.toString())
+            }
+            val (lines, tm, full) = report
+            val (total, matched) = tm
+            val level = when { total == 0 || matched == total -> 0; matched == 0 -> 2; else -> 1 }
+            val label = when {
+                onTweaks.isEmpty() && chosen.isEmpty() -> "Nothing to verify"
+                level == 0 -> "Verified"
+                level == 2 -> "Not applied"
+                else -> "Partly applied"
+            }
+            val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+            val saved = withContext(Dispatchers.IO) {
+                LogStore.save(ctx, "pixeltune_verify_$stamp.txt", lines.joinToString("\n") + "\n\nAll differences:\n" + full)
+            }
+            history.add(0, Entry(
+                "Verify applied tweaks", System.currentTimeMillis(), level, label,
+                (if (lines.isEmpty()) "Switch a tweak on or choose apps to compile first." else lines.joinToString("\n")) +
+                    (if (saved != null) "\nLog: $saved" else ""),
+            ))
+            tab = 4
+            busy = false
+        }
+    }
     fun isOpen(k: String, def: Boolean) = open[k] ?: def
 
     CompositionLocalProvider(LocalFx provides fx) {
@@ -315,20 +360,26 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                             }
                         }
                     }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        OutlinedButton(
-                            onClick = { runMany((toggles + packs).filter { on[it.id] == true }.map { it to false }) },
-                            enabled = canRun && activeOn > 0, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
-                            border = BorderStroke(1.dp, Brush.linearGradient(listOf(p.edgeHi, p.edgeLo))), colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
-                        ) { Text("Turn all off") }
-                        Button(
-                            onClick = { runMany(listOfNotNull(animTweak?.takeIf { on[it.id] != true }?.let { it to true }, aotAction?.let { it to true })) },
-                            enabled = canRun, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
-                        ) { Text("Apply recommended") }
+                    val tick = statsTick
+                    val am = ctx.getSystemService(ActivityManager::class.java)
+                    val mi = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+                    val sf = StatFs(Environment.getDataDirectory().path)
+                    val bat = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                    val tempC = (bat?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0) / 10f
+                    val lvl = bat?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+                    Panel {
+                        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Phone status", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                                IconButton(onClick = { statsTick = tick + 1 }) { Icon(Icons.Filled.Refresh, "Refresh", tint = p.sub) }
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                Stat(Formatter.formatShortFileSize(ctx, mi.availMem), "RAM free")
+                                Stat(Formatter.formatShortFileSize(ctx, sf.availableBytes), "Storage free")
+                                Stat(String.format("%.1f°C", tempC), "Battery $lvl%")
+                            }
+                        }
                     }
-                    Text("Recommended = faster animations + Compile apps. Compile was the only tweak that measurably sped things up (about 17% faster cold start in WhatsApp). Re-run it after big app updates. Undo it from the Actions tab.",
-                        color = p.sub, fontSize = 12.sp)
                 }
                 1 -> {
                 Panel {
@@ -389,26 +440,21 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                     }
                 }
                 3 -> {
-                    val tick = statsTick
-                    val am = ctx.getSystemService(ActivityManager::class.java)
-                    val mi = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
-                    val sf = StatFs(Environment.getDataDirectory().path)
-                    val bat = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-                    val tempC = (bat?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0) / 10f
-                    val lvl = bat?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
-                    Panel {
-                        Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Phone status", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                                IconButton(onClick = { statsTick = tick + 1 }) { Icon(Icons.Filled.Refresh, "Refresh", tint = p.sub) }
-                            }
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                Stat(Formatter.formatShortFileSize(ctx, mi.availMem), "RAM free")
-                                Stat(Formatter.formatShortFileSize(ctx, sf.availableBytes), "Storage free")
-                                Stat(String.format("%.1f°C", tempC), "Battery $lvl%")
-                            }
-                        }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedButton(
+                            onClick = { runMany((toggles + packs).filter { on[it.id] == true }.map { it to false }) },
+                            enabled = canRun && activeOn > 0, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, Brush.linearGradient(listOf(p.edgeHi, p.edgeLo))), colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
+                        ) { Text("Turn all off") }
+                        Button(
+                            onClick = { runMany(listOfNotNull(animTweak?.takeIf { on[it.id] != true }?.let { it to true }, aotAction?.let { it to true })) },
+                            enabled = canRun, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
+                        ) { Text("Apply recommended") }
                     }
+                    Text("Recommended = faster animations + Compile apps. Compile was the only tweak that measurably sped things up (about 17% faster cold start in WhatsApp). Re-run it after big app updates. Undo it from the Actions tab.",
+                        color = p.sub, fontSize = 12.sp)
+                    LaunchedEffect(Unit) { while (true) { delay(5000); statsTick++ } }
                     Panel {
                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text("Smoothness test", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
@@ -424,6 +470,18 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                                 colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
                             ) { Text(if (benching) benchMsg else "Run test") }
                             if (!benching && benchMsg.isNotBlank()) Text(benchMsg, color = p.sub, fontSize = 12.sp)
+                        }
+                    }
+                    Panel {
+                        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Verify tweaks", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                            Text("Reads each tweak's values back from Android and checks they match, and shows the compile state of the apps you chose. " +
+                                "This proves a tweak is applied. It does not prove it makes anything faster; the smoothness test does that.",
+                                color = p.sub, fontSize = 13.sp)
+                            Button(
+                                onClick = { runVerify() }, enabled = canRun, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
+                            ) { Text("Verify now") }
                         }
                     }
                     results.forEachIndexed { i, r ->
