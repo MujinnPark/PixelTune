@@ -163,9 +163,10 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                     append("\nFull output:\n").append(r.raw)
                 })
             }
+            val fails = if (enable) r.failed else 0 // reverting flags that were never set is expected to be rejected
             val level = when {
-                cmds.isNotEmpty() && r.failed >= cmds.size -> 2
-                r.failed > 0 || r.other.any { Regex("(?i)exception|error|fail|denied|not found").containsMatchIn(it) } -> 1
+                cmds.isNotEmpty() && fails >= cmds.size -> 2
+                fails > 0 || r.other.any { Regex("(?i)exception|error|fail|denied|not found").containsMatchIn(it) } -> 1
                 else -> 0
             }
             val label = when {
@@ -179,7 +180,10 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                 append("${cmds.size} command(s) sent")
                 if (skipped.isNotEmpty()) append(" · ${skipped.size} skipped for notifications")
                 if (r.ok > 0) append(" · ${r.ok} packages OK")
-                if (r.failed > 0) append(" · ${r.failed} rejected by Android" + if (r.ok == 0) " (${(cmds.size - r.failed).coerceAtLeast(0)} accepted)" else "")
+                if (r.failed > 0) append(
+                    if (enable) " · ${r.failed} rejected by Android" + (if (r.ok == 0) " (${(cmds.size - r.failed).coerceAtLeast(0)} accepted)" else "")
+                    else " · ${r.failed} were never set, nothing to remove"
+                )
                 if (r.other.isNotEmpty()) append(" · ${r.other.size} other message(s)")
                 r.other.take(3).forEach { append("\n$it") }
                 append(if (saved != null) "\nLog: $saved" else "\nCould not save the log file.")
