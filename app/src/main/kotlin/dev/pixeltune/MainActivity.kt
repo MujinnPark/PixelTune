@@ -20,6 +20,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -34,8 +35,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -81,13 +84,29 @@ class MainActivity : ComponentActivity() {
 
 // ---------- palette (light/dark) ----------
 private class Pal(
-    val bg: Color, val card: Color, val text: Color, val sub: Color, val line: Color,
+    val bgTop: Color, val bgBottom: Color, val blobs: List<Color>,
+    val glass: Color, val glassHi: Color, val edgeHi: Color, val edgeLo: Color,
+    val card: Color, val text: Color, val sub: Color, val line: Color,
     val blue: Color, val red: Color, val redBg: Color, val amber: Color, val navy: Color,
 )
-private val Light = Pal(Color(0xFFF4F5F7), Color.White, Color(0xFF14171F), Color(0xFF6B7280), Color(0xFFE6E8EC),
-    Color(0xFF0A7BF0), Color(0xFFD92D20), Color(0xFFFDECEC), Color(0xFFF5B800), Color(0xFF1B1F2E))
-private val Dark = Pal(Color(0xFF0F1117), Color(0xFF1A1D27), Color(0xFFF2F3F7), Color(0xFF9AA0AE), Color(0xFF2A2E3A),
-    Color(0xFF3B93FF), Color(0xFFFF6B63), Color(0xFF3A1E21), Color(0xFFF5B800), Color(0xFF1B1F2E))
+private val Light = Pal(
+    bgTop = Color(0xFFE6EDFF), bgBottom = Color(0xFFFFF0E4),
+    blobs = listOf(Color(0xFF6FA0FF).copy(alpha = .55f), Color(0xFFB794F6).copy(alpha = .45f), Color(0xFF5EEAD4).copy(alpha = .40f), Color(0xFFFFB27A).copy(alpha = .45f)),
+    glass = Color.White.copy(alpha = .42f), glassHi = Color.White.copy(alpha = .72f),
+    edgeHi = Color.White.copy(alpha = .95f), edgeLo = Color.White.copy(alpha = .35f),
+    card = Color.Transparent, text = Color(0xFF14172B), sub = Color(0xFF4B5575), line = Color(0xFF14172B).copy(alpha = .10f),
+    blue = Color(0xFF2F6BFF), red = Color(0xFFD92D20), redBg = Color(0xFFD92D20).copy(alpha = .14f),
+    amber = Color(0xFFF5B800), navy = Color(0xFF0B1020).copy(alpha = .70f),
+)
+private val Dark = Pal(
+    bgTop = Color(0xFF0B1026), bgBottom = Color(0xFF0A0E1C),
+    blobs = listOf(Color(0xFF3B6BFF).copy(alpha = .55f), Color(0xFF8B5CF6).copy(alpha = .45f), Color(0xFF14B8A6).copy(alpha = .35f), Color(0xFFFF8A4C).copy(alpha = .30f)),
+    glass = Color.White.copy(alpha = .07f), glassHi = Color.White.copy(alpha = .14f),
+    edgeHi = Color.White.copy(alpha = .40f), edgeLo = Color.White.copy(alpha = .06f),
+    card = Color.Transparent, text = Color(0xFFF4F6FF), sub = Color(0xFFB4BBD4), line = Color.White.copy(alpha = .14f),
+    blue = Color(0xFF5AA2FF), red = Color(0xFFFF6B63), redBg = Color(0xFFFF6B63).copy(alpha = .18f),
+    amber = Color(0xFFF5B800), navy = Color(0xFF0B1020).copy(alpha = .62f),
+)
 private val LocalPal = staticCompositionLocalOf { Light }
 private val Green = Color(0xFF16A34A)
 
@@ -214,7 +233,16 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     }
     fun isOpen(k: String, def: Boolean) = open[k] ?: def
 
-    Column(Modifier.fillMaxSize().background(p.bg)) {
+    Column(
+        Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(p.bgTop, p.bgBottom))).drawBehind {
+            fun glow(c: Color, cx: Float, cy: Float, r: Float) =
+                drawCircle(Brush.radialGradient(listOf(c, Color.Transparent), center = Offset(cx, cy), radius = r), radius = r, center = Offset(cx, cy))
+            glow(p.blobs[0], size.width * .15f, size.height * .12f, size.width * .85f)
+            glow(p.blobs[1], size.width * .95f, size.height * .38f, size.width * .75f)
+            glow(p.blobs[2], size.width * .10f, size.height * .70f, size.width * .85f)
+            glow(p.blobs[3], size.width * .90f, size.height * .95f, size.width * .75f)
+        },
+    ) {
         Header(status) { showSettings = true }
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp), color = p.blue, trackColor = p.line)
         Column(
@@ -506,7 +534,14 @@ private fun Header(status: Int, onGear: () -> Unit) {
 
 @Composable
 private fun Panel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(LocalPal.current.card), content = content)
+    val p = LocalPal.current
+    val shape = RoundedCornerShape(24.dp)
+    Column(
+        modifier.fillMaxWidth().clip(shape)
+            .background(Brush.linearGradient(listOf(p.glassHi, p.glass)))
+            .border(1.dp, Brush.linearGradient(listOf(p.edgeHi, p.edgeLo)), shape),
+        content = content,
+    )
 }
 
 @Composable
@@ -563,7 +598,12 @@ private fun ToggleRow(t: Tweak, checked: Boolean, enabled: Boolean, onChange: (B
 @Composable
 private fun IssueCard(label: String, color: Color, bg: Color, time: String, title: String, body: String = "") {
     val p = LocalPal.current
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(bg).padding(14.dp)) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+            .background(Brush.linearGradient(listOf(p.glassHi, p.glass))).background(bg)
+            .border(1.dp, Brush.linearGradient(listOf(p.edgeHi, p.edgeLo)), RoundedCornerShape(18.dp))
+            .padding(14.dp),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(8.dp).clip(CircleShape).background(color))
             Spacer(Modifier.width(6.dp))
@@ -610,6 +650,7 @@ private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
     val dim = Color(0xFF6B7280)
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(p.navy)
+            .border(1.dp, Brush.linearGradient(listOf(p.edgeHi, p.edgeLo)), RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
             .navigationBarsPadding().padding(top = 12.dp, bottom = 10.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
