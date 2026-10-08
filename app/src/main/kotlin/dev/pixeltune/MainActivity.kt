@@ -165,6 +165,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     var busy by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<Tweak?>(null) }
     var showSettings by remember { mutableStateOf(false) }
+    var confirmReset by remember { mutableStateOf(false) }
     var keepNotif by remember { mutableStateOf(prefs.getBoolean("keep_notif", true)) }
     var liquid by remember { mutableStateOf(prefs.getBoolean("fx_anim", true)) }
     val tState: State<Float> = if (liquid) {
@@ -266,6 +267,17 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     fun runMany(list: List<Pair<Tweak, Boolean>>) {
         scope.launch { busy = true; list.forEach { (t, e) -> exec(t, e) }; busy = false }
     }
+    fun resetAll() {
+        scope.launch {
+            busy = true
+            (toggles + packs).forEach { exec(it, false) }
+            if (alive.isNotEmpty()) exec(aliveTweak(), false)
+            actions.firstOrNull { it.id == "reset" }?.let { exec(it, true) }
+            history.add(0, Entry("Reset everything", System.currentTimeMillis(), 1, "Reboot to finish",
+                "Tweaks are back to Android's defaults and app compilation is reset. Debug properties and some services only fully clear after a reboot."))
+            busy = false
+        }
+    }
     fun runBench() {
         scope.launch {
             busy = true; benching = true; benchMsg = "Starting..."
@@ -344,6 +356,25 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                             }
                         }
                     }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedButton(
+                            onClick = { runMany((toggles + packs).filter { on[it.id] == true }.map { it to false }) },
+                            enabled = canRun && activeOn > 0, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, Brush.linearGradient(listOf(p.edgeHi, p.edgeLo))), colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
+                        ) { Text("Turn all off") }
+                        Button(
+                            onClick = { runMany(listOfNotNull(animTweak?.takeIf { on[it.id] != true }?.let { it to true }, aotAction?.let { it to true })) },
+                            enabled = canRun, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
+                        ) { Text("Apply recommended") }
+                    }
+                    Text("Recommended = faster animations + Compile apps. Compile was the only tweak that measurably sped things up (about 17% faster cold start in WhatsApp). Re-run it after big app updates. Undo it from the Actions tab.",
+                        color = p.sub, fontSize = 12.sp)
+                    OutlinedButton(
+                        onClick = { confirmReset = true }, enabled = canRun, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, p.red.copy(alpha = .55f)), colors = ButtonDefaults.outlinedButtonColors(contentColor = p.red),
+                    ) { Text("Reset everything") }
+                    LaunchedEffect(Unit) { while (true) { delay(5000); statsTick++ } }
                 }
                 1 -> {
                 Panel {
@@ -425,21 +456,6 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                     }
                 }
                 3 -> {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        OutlinedButton(
-                            onClick = { runMany((toggles + packs).filter { on[it.id] == true }.map { it to false }) },
-                            enabled = canRun && activeOn > 0, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
-                            border = BorderStroke(1.dp, Brush.linearGradient(listOf(p.edgeHi, p.edgeLo))), colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
-                        ) { Text("Turn all off") }
-                        Button(
-                            onClick = { runMany(listOfNotNull(animTweak?.takeIf { on[it.id] != true }?.let { it to true }, aotAction?.let { it to true })) },
-                            enabled = canRun, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
-                        ) { Text("Apply recommended") }
-                    }
-                    Text("Recommended = faster animations + Compile apps. Compile was the only tweak that measurably sped things up (about 17% faster cold start in WhatsApp). Re-run it after big app updates. Undo it from the Actions tab.",
-                        color = p.sub, fontSize = 12.sp)
-                    LaunchedEffect(Unit) { while (true) { delay(5000); statsTick++ } }
                     Panel {
                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text("Smoothness test", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
@@ -565,6 +581,17 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
             }
         },
         confirmButton = { TextButton(onClick = { showPicker = false }) { Text("Close") } },
+    )
+    if (confirmReset) AlertDialog(
+        onDismissRequest = { confirmReset = false },
+        title = { Text("Reset everything?") },
+        text = {
+            Text("This turns off every PixelTune tweak and deletes the values they set, so those settings go back to Android's defaults " +
+                "(including any you changed yourself on the same keys). It also undoes app compilation and the keep-alive list. " +
+                "Reboot afterwards to finish.")
+        },
+        confirmButton = { TextButton(onClick = { confirmReset = false; resetAll() }) { Text("Reset", color = p.red) } },
+        dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("Cancel") } },
     )
     if (showSettings) AlertDialog(
         onDismissRequest = { showSettings = false },
