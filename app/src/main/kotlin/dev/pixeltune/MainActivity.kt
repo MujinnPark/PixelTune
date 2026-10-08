@@ -197,6 +197,14 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     var selQuery by remember { mutableStateOf("") }
     var userOnly by remember { mutableStateOf(true) }
     fun saveSel() { prefs.edit().putString("aot_sel", sel.joinToString(",")).apply() }
+    val alive = remember { (prefs.getString("alive_sel", "") ?: "").split(",").filter { it.isNotBlank() }.toMutableStateList() }
+    var pickAlive by remember { mutableStateOf(false) }
+    fun aliveTweak() = Tweak(
+        id = "alive", title = "Keep apps alive", desc = "",
+        apply = alive.flatMap { listOf("cmd deviceidle whitelist +$it", "cmd appops set $it RUN_ANY_IN_BACKGROUND allow") },
+        revert = alive.flatMap { listOf("cmd deviceidle whitelist -$it", "cmd appops set $it RUN_ANY_IN_BACKGROUND default") },
+        action = true,
+    )
     fun selTweak() = Tweak(
         id = "aotsel", title = "Compile selected apps", desc = "",
         apply = sel.map { "cmd package compile -m speed-profile $it" },
@@ -272,50 +280,6 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                 benchMsg = if (it.frames < 50) "Only ${it.frames} frames rendered. Pick a scrollable app (Settings, Chrome)." else "Done."
             }.onFailure { benchMsg = "Failed: ${it.message}" }
             benching = false; busy = false
-        }
-    }
-    fun runVerify() {
-        scope.launch {
-            busy = true
-            val names = apps.associate { it.second to it.first }
-            val onTweaks = (toggles + packs).filter { on[it.id] == true }
-            val chosen = sel.toList()
-            val guard = keepNotif
-            val report = withContext(Dispatchers.IO) {
-                val lines = mutableListOf<String>()
-                val full = StringBuilder()
-                var total = 0
-                var matched = 0
-                onTweaks.forEach { t ->
-                    val r = Verify.check(t.apply.filter { !(guard && Tweaks.touchesNotifications(it)) })
-                    total += r.total; matched += r.matched
-                    lines += "${t.title}: ${r.matched}/${r.total} match"
-                    r.bad.take(3).forEach { lines += "  - $it" }
-                    r.bad.forEach { full.append(t.title).append(": ").append(it).append('\n') }
-                }
-                chosen.forEach { pk -> lines += "${names[pk] ?: pk}: compiled ${Verify.compileStatus(pk)}" }
-                Triple(lines, total to matched, full.toString())
-            }
-            val (lines, tm, full) = report
-            val (total, matched) = tm
-            val level = when { total == 0 || matched == total -> 0; matched == 0 -> 2; else -> 1 }
-            val label = when {
-                onTweaks.isEmpty() && chosen.isEmpty() -> "Nothing to verify"
-                level == 0 -> "Verified"
-                level == 2 -> "Not applied"
-                else -> "Partly applied"
-            }
-            val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
-            val saved = withContext(Dispatchers.IO) {
-                LogStore.save(ctx, "pixeltune_verify_$stamp.txt", lines.joinToString("\n") + "\n\nAll differences:\n" + full)
-            }
-            history.add(0, Entry(
-                "Verify applied tweaks", System.currentTimeMillis(), level, label,
-                (if (lines.isEmpty()) "Switch a tweak on or choose apps to compile first." else lines.joinToString("\n")) +
-                    (if (saved != null) "\nLog: $saved" else ""),
-            ))
-            tab = 4
-            busy = false
         }
     }
     fun isOpen(k: String, def: Boolean) = open[k] ?: def
@@ -410,7 +374,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                         Text(if (sel.isEmpty()) "No apps chosen yet." else sel.joinToString(", ") { names[it] ?: it }, color = p.text, fontSize = 14.sp)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             OutlinedButton(
-                                onClick = { showSelPicker = true }, enabled = canRun, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
+                                onClick = { pickAlive = false; showSelPicker = true }, enabled = canRun, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
                                 border = BorderStroke(1.dp, Brush.linearGradient(listOf(p.edgeHi, p.edgeLo))), colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
                             ) { Text("Choose apps") }
                             Button(
@@ -421,12 +385,33 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                         if (sel.isNotEmpty()) TextButton(onClick = { run(selTweak(), false) }, enabled = canRun) { Text("Reset these apps", color = p.sub) }
                     }
                 }
+                Panel {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Keep apps alive", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                        Text("Exempts the apps you pick (chat apps, for example) from Doze and background limits so their notifications arrive on time. Costs a little battery for those apps only.",
+                            color = p.sub, fontSize = 13.sp)
+                        val anames = apps.associate { it.second to it.first }
+                        Text(if (alive.isEmpty()) "No apps chosen yet." else alive.joinToString(", ") { anames[it] ?: it }, color = p.text, fontSize = 14.sp)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedButton(
+                                onClick = { pickAlive = true; showSelPicker = true }, enabled = canRun, modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, Brush.linearGradient(listOf(p.edgeHi, p.edgeLo))),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
+                            ) { Text("Choose apps") }
+                            Button(
+                                onClick = { run(aliveTweak(), true) }, enabled = canRun && alive.isNotEmpty(), modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
+                            ) { Text("Allow") }
+                        }
+                        if (alive.isNotEmpty()) TextButton(onClick = { run(aliveTweak(), false) }, enabled = canRun) { Text("Reset these apps", color = p.sub) }
+                    }
+                }
                 }
                 2 -> {
                     val std = packs.filter { !it.risky }
                     val risky = packs.filter { it.risky }
                     val onToggle = { t: Tweak, v: Boolean -> if (v && t.risky) confirm = t else run(t, v) }
-                    Accordion("Display & motion", Icons.Filled.Refresh, isOpen("d", true), { open["d"] = !isOpen("d", true) },
+                    Accordion("System tweaks", Icons.Filled.Refresh, isOpen("d", true), { open["d"] = !isOpen("d", true) },
                         badges = { CountChip(toggles.count { on[it.id] == true }, p.amber, Color.Black) }) {
                         toggles.forEachIndexed { i, t -> if (i > 0) Hairline(); ToggleRow(t, on[t.id] == true, canRun) { onToggle(t, it) } }
                     }
@@ -470,18 +455,6 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                                 colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
                             ) { Text(if (benching) benchMsg else "Run test") }
                             if (!benching && benchMsg.isNotBlank()) Text(benchMsg, color = p.sub, fontSize = 12.sp)
-                        }
-                    }
-                    Panel {
-                        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text("Verify tweaks", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                            Text("Reads each tweak's values back from Android and checks they match, and shows the compile state of the apps you chose. " +
-                                "This proves a tweak is applied. It does not prove it makes anything faster; the smoothness test does that.",
-                                color = p.sub, fontSize = 13.sp)
-                            Button(
-                                onClick = { runVerify() }, enabled = canRun, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
-                            ) { Text("Verify now") }
                         }
                     }
                     results.forEachIndexed { i, r ->
@@ -549,7 +522,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     }
     if (showSelPicker) AlertDialog(
         onDismissRequest = { showSelPicker = false },
-        title = { Text("Choose apps to compile") },
+        title = { Text(if (pickAlive) "Choose apps to keep alive" else "Choose apps to compile") },
         text = {
             Column {
                 OutlinedTextField(value = selQuery, onValueChange = { selQuery = it }, singleLine = true,
@@ -558,15 +531,17 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                     Checkbox(checked = userOnly, onCheckedChange = { userOnly = it }, colors = CheckboxDefaults.colors(checkedColor = p.blue))
                     Text("User apps only", fontSize = 14.sp)
                 }
+                val target = if (pickAlive) alive else sel
+                fun saveTarget() { prefs.edit().putString(if (pickAlive) "alive_sel" else "aot_sel", target.joinToString(",")).apply() }
                 val shown = apps.filter { (l, pk) -> (!userOnly || pk in userPkgs) && l.contains(selQuery, ignoreCase = true) }
                 LazyColumn(Modifier.heightIn(max = 340.dp)) {
                     items(shown, key = { it.second }) { (label, pkg) ->
                         Row(
-                            Modifier.fillMaxWidth().clickable { if (pkg in sel) sel.remove(pkg) else sel.add(pkg); saveSel() },
+                            Modifier.fillMaxWidth().clickable { if (pkg in target) target.remove(pkg) else target.add(pkg); saveTarget() },
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Checkbox(checked = pkg in sel, colors = CheckboxDefaults.colors(checkedColor = p.blue),
-                                onCheckedChange = { if (it) { if (pkg !in sel) sel.add(pkg) } else sel.remove(pkg); saveSel() })
+                            Checkbox(checked = pkg in target, colors = CheckboxDefaults.colors(checkedColor = p.blue),
+                                onCheckedChange = { if (it) { if (pkg !in target) target.add(pkg) } else target.remove(pkg); saveTarget() })
                             Text(label, fontSize = 15.sp)
                         }
                     }

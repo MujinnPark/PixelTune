@@ -24,6 +24,9 @@ object Tweaks {
         Tweak("trim", "Trim app caches", "Deletes apps' temporary files to free space.",
             "Apps may open slightly slower the first time.",
             listOf("pm trim-caches 999G"), action = true),
+        Tweak("maint", "Run storage maintenance", "Trims flash storage and runs the system's idle cleanup now.",
+            "Takes a minute and warms the phone. Best while cool or charging.",
+            listOf("sm idle-maint run"), action = true),
         Tweak("kill", "Clear background apps", "Closes apps running in the background.",
             "Frees RAM briefly; apps reload when you open them. If notifications act up, reboot.",
             listOf("am kill-all"), action = true),
@@ -41,6 +44,13 @@ object Tweaks {
             "Uses more battery. No smoothness gain showed up in tests.",
             listOf("settings put system peak_refresh_rate $hz.0", "settings put system min_refresh_rate $hz.0"),
             listOf("settings delete system peak_refresh_rate", "settings delete system min_refresh_rate")),
+        Tweak("blur", "Disable window blur", "Turns off the blur behind the notification shade and system panels.",
+            "Less GPU work, flatter look. Not measured. Pull down the shade to see if it worked.",
+            listOf("settings put global disable_window_blurs 1"), listOf("settings delete global disable_window_blurs")),
+        Tweak("scan", "Stop background scanning", "Stops Wi-Fi and Bluetooth scanning while those radios are off.",
+            "Tiny battery saving. Can make location and Find My Device less accurate.",
+            listOf("settings put global wifi_scan_always_enabled 0", "settings put global ble_scan_always_enabled 0"),
+            listOf("settings delete global wifi_scan_always_enabled", "settings delete global ble_scan_always_enabled")),
     )
 
     fun packs(c: Context): List<Tweak> {
