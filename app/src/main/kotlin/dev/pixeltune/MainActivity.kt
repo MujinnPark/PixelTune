@@ -166,6 +166,9 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     var confirm by remember { mutableStateOf<Tweak?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var confirmReset by remember { mutableStateOf(false) }
+    var resScale by remember { mutableStateOf(prefs.getInt("res_scale", 100)) }
+    var resPick by remember { mutableStateOf(90) }
+    var resConfirm by remember { mutableStateOf(0) }
     var keepNotif by remember { mutableStateOf(prefs.getBoolean("keep_notif", true)) }
     var liquid by remember { mutableStateOf(prefs.getBoolean("fx_anim", true)) }
     val tState: State<Float> = if (liquid) {
@@ -267,11 +270,62 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     fun runMany(list: List<Pair<Tweak, Boolean>>) {
         scope.launch { busy = true; list.forEach { (t, e) -> exec(t, e) }; busy = false }
     }
+    /** Sets the display to pct% of native size and density (100 = reset). Returns an error text, or null on success. */
+    suspend fun setScale(pct: Int): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            if (pct >= 100) {
+                Shell.run("wm size reset; wm density reset")
+                null
+            } else {
+                val s = Shell.run("wm size")
+                val d = Shell.run("wm density")
+                val ms = Regex("Physical size:\\s*(\\d+)x(\\d+)").find(s) ?: return@runCatching "Couldn't read the screen size"
+                val md = Regex("Physical density:\\s*(\\d+)").find(d) ?: return@runCatching "Couldn't read the screen density"
+                val w = ms.groupValues[1].toInt(); val h = ms.groupValues[2].toInt(); val dpi = md.groupValues[1].toInt()
+                Shell.run("wm size ${w * pct / 100 / 4 * 4}x${h * pct / 100 / 4 * 4}; wm density ${dpi * pct / 100}")
+                null
+            }
+        }.getOrElse { it.message ?: "Failed" }
+    }
+    fun applyRes(pct: Int) {
+        scope.launch {
+            busy = true
+            val before = resScale
+            prefs.edit().putBoolean("res_pending", true).apply()
+            val err = setScale(pct)
+            if (err == null) { resScale = pct; prefs.edit().putInt("res_scale", pct).apply() }
+            history.add(0, Entry("Display resolution", System.currentTimeMillis(), if (err == null) 1 else 2,
+                if (err == null) (if (pct >= 100) "Reset" else "Confirm") else "Failed",
+                err ?: if (pct >= 100) "Display size is back to native." else "Set to $pct%. Confirm within 15 seconds or it reverts."))
+            busy = false
+            if (err != null || pct >= 100) { prefs.edit().putBoolean("res_pending", false).apply(); return@launch }
+            resConfirm = 15
+            while (resConfirm > 0) { delay(1000); resConfirm-- }
+            if (prefs.getBoolean("res_pending", false)) {
+                setScale(before)
+                resScale = before
+                prefs.edit().putInt("res_scale", before).putBoolean("res_pending", false).apply()
+                history.add(0, Entry("Display resolution", System.currentTimeMillis(), 1, "Reverted", "Not confirmed in time, so the display size went back to $before%."))
+            }
+        }
+    }
+    // Safety net: an unconfirmed change left over from a crash or a closed app is reset on the next launch.
+    LaunchedEffect(status) {
+        if (status == 2 && resConfirm == 0 && !busy && prefs.getBoolean("res_pending", false)) {
+            setScale(100)
+            resScale = 100
+            prefs.edit().putInt("res_scale", 100).putBoolean("res_pending", false).apply()
+            history.add(0, Entry("Display resolution", System.currentTimeMillis(), 1, "Reset", "An unconfirmed change was found at startup, so the display size was reset."))
+        }
+    }
     fun resetAll() {
         scope.launch {
             busy = true
             (toggles + packs).forEach { exec(it, false) }
             if (alive.isNotEmpty()) exec(aliveTweak(), false)
+            setScale(100)
+            resScale = 100
+            prefs.edit().putInt("res_scale", 100).putBoolean("res_pending", false).apply()
             actions.firstOrNull { it.id == "reset" }?.let { exec(it, true) }
             history.add(0, Entry("Reset everything", System.currentTimeMillis(), 1, "Reboot to finish",
                 "Tweaks are back to Android's defaults and app compilation is reset. Debug properties and some services only fully clear after a reboot."))
@@ -446,6 +500,32 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                         badges = { CountChip(toggles.count { on[it.id] == true }, p.amber, Color.Black) }) {
                         toggles.forEachIndexed { i, t -> if (i > 0) Hairline(); ToggleRow(t, on[t.id] == true, canRun) { onToggle(t, it) } }
                     }
+                    Accordion("Display resolution", Icons.Filled.Settings, isOpen("res", false), { open["res"] = !isOpen("res", false) },
+                        badges = { if (resScale < 100) Chip("$resScale%", p.amber, Color.Black) }) {
+                        Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Draws the whole screen at a lower resolution and scales it up. Less GPU work means cooler and smoother in heavy games, " +
+                                "but a softer picture. Open apps may restart when it changes. A 15-second timer reverts it unless you tap Keep.",
+                                color = p.sub, fontSize = 13.sp)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf(100, 90, 80, 70).forEach { v ->
+                                    Text("$v%", fontSize = 14.sp, color = if (resPick == v) Color.White else p.text,
+                                        modifier = Modifier.clip(RoundedCornerShape(50)).background(if (resPick == v) p.blue else p.line)
+                                            .clickable { resPick = v }.padding(horizontal = 16.dp, vertical = 8.dp))
+                                }
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Button(
+                                    onClick = { applyRes(resPick) }, enabled = canRun && resPick != resScale, modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
+                                ) { Text(if (resPick >= 100) "Restore native" else "Apply $resPick%") }
+                                OutlinedButton(
+                                    onClick = { applyRes(100) }, enabled = canRun && resScale < 100, modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, Brush.linearGradient(listOf(p.edgeHi, p.edgeLo))),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
+                                ) { Text("Reset display size") }
+                            }
+                        }
+                    }
                     Accordion("Cleanup & privacy packs", Icons.Filled.Build, isOpen("c", false), { open["c"] = !isOpen("c", false) },
                         badges = { CountChip(std.count { on[it.id] == true }, p.amber, Color.Black) }) {
                         std.forEachIndexed { i, t -> if (i > 0) Hairline(); ToggleRow(t, on[t.id] == true, canRun) { onToggle(t, it) } }
@@ -582,12 +662,19 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
         },
         confirmButton = { TextButton(onClick = { showPicker = false }) { Text("Close") } },
     )
+    if (resConfirm > 0) AlertDialog(
+        onDismissRequest = {},
+        title = { Text("Keep this resolution?") },
+        text = { Text("Reverting in $resConfirm s unless you tap Keep.") },
+        confirmButton = { TextButton(onClick = { prefs.edit().putBoolean("res_pending", false).apply(); resConfirm = 0 }) { Text("Keep") } },
+        dismissButton = { TextButton(onClick = { resConfirm = 0 }) { Text("Revert now") } },
+    )
     if (confirmReset) AlertDialog(
         onDismissRequest = { confirmReset = false },
         title = { Text("Reset everything?") },
         text = {
             Text("This turns off every PixelTune tweak and deletes the values they set, so those settings go back to Android's defaults " +
-                "(including any you changed yourself on the same keys). It also undoes app compilation and the keep-alive list. " +
+                "(including any you changed yourself on the same keys). It also undoes app compilation, the keep-alive list and any display-size change. " +
                 "Reboot afterwards to finish.")
         },
         confirmButton = { TextButton(onClick = { confirmReset = false; resetAll() }) { Text("Reset", color = p.red) } },
