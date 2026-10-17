@@ -141,11 +141,11 @@ private class Pal(
     val face: Color = bg,
 )
 private val Light = Pal(
-    bg = Color(0xFFE7ECF4), hi = Color.White, lo = Color(0xFFBFC9DC), card = Color.Transparent,
-    text = Color(0xFF1B2440), sub = Color(0xFF6F7893), line = Color(0xFFBFC9DC).copy(alpha = .55f),
+    bg = Color(0xFFD6DFEE), hi = Color.White, lo = Color(0xFF93A4C4), card = Color.Transparent,
+    text = Color(0xFF1B2440), sub = Color(0xFF5A6482), line = Color(0xFF93A4C4).copy(alpha = .50f),
     blue = Color(0xFF2F6BFF), blueHi = Color(0xFF5B9BFF), cyan = Color(0xFF2BD0E6),
     red = Color(0xFFD92D20), redBg = Color(0xFFD92D20).copy(alpha = .12f), amber = Color(0xFFF5B800), thumb = Color(0xFFF6F8FC),
-    face = Color(0xFFF2F5FB),
+    face = Color(0xFFF5F8FD),
 )
 private val Dark = Pal(
     bg = Color(0xFF23262D), hi = Color(0xFF30343D), lo = Color(0xFF15171C), card = Color.Transparent,
@@ -445,18 +445,6 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                     }
                     Text("Recommended = faster animations + Compile apps. Compile was the only tweak that measurably sped things up (about 17% faster cold start in WhatsApp). Re-run it after big app updates. Undo it from the Actions tab.",
                         color = p.sub, fontSize = 12.sp)
-                    SectionTitle("Quick actions")
-                    val quick = actions.filter { it.id != "reset" }.take(4)
-                    val qIcons = listOf(Icons.Filled.PlayArrow, Icons.Filled.Refresh, Icons.Filled.Build, Icons.Filled.Settings)
-                    quick.chunked(2).forEachIndexed { row, items ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                            items.forEachIndexed { col, t ->
-                                val k = row * 2 + col
-                                QuickTile(t.title, qIcons[k], k == 0, canRun, Modifier.weight(1f)) { run(t, true) }
-                            }
-                            if (items.size == 1) Spacer(Modifier.weight(1f))
-                        }
-                    }
                     if (results.size >= 2) {
                         SectionTitle("Smoothness trend")
                         val latest = results[0].jankPct.toFloat()
@@ -767,9 +755,9 @@ private fun DrawScope.aurora(p: Pal) {
         val o = Offset(size.width * x, size.height * y)
         drawCircle(Brush.radialGradient(listOf(c.copy(alpha = a), Color.Transparent), o, r), r, o)
     }
-    blob(p.cyan, .22f, 1.0f, .02f, size.width * .85f)
-    blob(Color(0xFF8B5CF6), .16f, 0f, .35f, size.width * .8f)
-    blob(p.blue, .18f, 1.0f, .85f, size.width * .8f)
+    blob(p.cyan, .14f, 1.0f, .02f, size.width * .85f)
+    blob(Color(0xFF8B5CF6), .10f, 0f, .35f, size.width * .8f)
+    blob(p.blue, .12f, 1.0f, .85f, size.width * .8f)
 }
 
 /** Click with a springy press-in squish and no ripple. */
@@ -1065,27 +1053,6 @@ private fun VBar(label: String, value: String, frac: Float, brush: Brush) {
         Spacer(Modifier.height(8.dp))
         Text(value, color = p.text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         Text(label, color = p.sub, fontSize = 11.sp)
-    }
-}
-
-/** Square tile like the dashboard reference: the featured one is a blue gradient, the rest are raised white. */
-@Composable
-private fun QuickTile(title: String, icon: ImageVector, featured: Boolean, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
-    val p = LocalPal.current
-    val look = if (featured)
-        Modifier.neuRaised(p, 26.dp, 7.dp, Brush.linearGradient(listOf(p.blueHi, p.blue)), p.blue.copy(alpha = .45f))
-    else Modifier.neuRaised(p, 26.dp, 7.dp)
-    Column(
-        modifier.graphicsLayer { alpha = if (enabled) 1f else .45f }
-            .then(look)
-            .bounceClick { if (enabled) onClick() }
-            .heightIn(min = 112.dp).padding(14.dp),
-        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
-    ) {
-        Icon(icon, null, tint = if (featured) Color.White else p.blue, modifier = Modifier.size(30.dp))
-        Spacer(Modifier.height(10.dp))
-        Text(title, color = if (featured) Color.White else p.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-            maxLines = 2, textAlign = TextAlign.Center)
     }
 }
 
