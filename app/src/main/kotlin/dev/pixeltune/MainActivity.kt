@@ -171,6 +171,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     var resConfirm by remember { mutableStateOf(0) }
     var keepNotif by remember { mutableStateOf(prefs.getBoolean("keep_notif", true)) }
     var liquid by remember { mutableStateOf(prefs.getBoolean("fx_anim", true)) }
+    var resetOnBoot by remember { mutableStateOf(prefs.getBoolean("reset_on_boot", true)) }
     val tState: State<Float> = if (liquid) {
         rememberInfiniteTransition(label = "liquid").animateFloat(0f, 1f, infiniteRepeatable(tween(60000, easing = LinearEasing)), label = "t")
     } else remember { mutableStateOf(.15f) }
@@ -316,6 +317,17 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
             resScale = 100
             prefs.edit().putInt("res_scale", 100).putBoolean("res_pending", false).apply()
             history.add(0, Entry("Display resolution", System.currentTimeMillis(), 1, "Reset", "An unconfirmed change was found at startup, so the display size was reset."))
+        }
+    }
+    // After a reboot, turn tweaks off once Shizuku is up; reload the screen state when that happens.
+    LaunchedEffect(status) { if (status == 2) AutoReset.runIfNeeded(ctx.applicationContext) }
+    val resetVer = AutoReset.version.intValue
+    LaunchedEffect(resetVer) {
+        if (resetVer > 0) {
+            (toggles + packs).forEach { on[it.id] = prefs.getBoolean(it.id, false) }
+            resScale = prefs.getInt("res_scale", 100)
+            history.add(0, Entry("Reset after reboot", System.currentTimeMillis(), 0, "Done",
+                "All tweaks were turned off after the reboot. Compile state was left alone."))
         }
     }
     fun resetAll() {
@@ -699,6 +711,14 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                         Text("Animated glass background. Turn off to save battery and heat.", fontSize = 13.sp)
                     }
                     Switch(checked = liquid, onCheckedChange = { liquid = it; prefs.edit().putBoolean("fx_anim", it).apply() })
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                        Text("Reset tweaks after reboot", fontWeight = FontWeight.Medium)
+                        Text("After each reboot, turns every tweak off again once Shizuku starts. Compile is left alone.", fontSize = 13.sp)
+                    }
+                    Switch(checked = resetOnBoot, onCheckedChange = { resetOnBoot = it; prefs.edit().putBoolean("reset_on_boot", it).apply() })
                 }
                 Spacer(Modifier.height(12.dp))
                 Text("Logs are saved to Download/PixelTune · v$ver", fontSize = 12.sp)

@@ -9,6 +9,7 @@
         </intent>
     </queries>
     <application
+        android:name=".PixelApp"
         android:label="PixelTune"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
