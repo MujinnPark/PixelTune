@@ -63,10 +63,10 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
-import androidx.compose.ui.graphics.asFrameworkPaint
+import androidx.compose.ui.graphics.asAndroidPath
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TileMode
@@ -676,21 +676,19 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
 
 // ---------- neumorphism primitives ----------
 private fun DrawScope.neuFill(fill: Color, shadow: Color, dx: Float, dy: Float, blur: Float, r: Float) {
-    val paint = Paint()
-    paint.asFrameworkPaint().apply {
+    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         color = fill.toArgb()
         setShadowLayer(blur, dx, dy, shadow.toArgb())
     }
-    drawContext.canvas.drawRoundRect(0f, 0f, size.width, size.height, r, r, paint)
+    drawContext.canvas.nativeCanvas.drawRoundRect(0f, 0f, size.width, size.height, r, r, paint)
 }
 
 private fun DrawScope.neuShadowPath(path: Path, fill: Color, shadow: Color, dx: Float, dy: Float, blur: Float) {
-    val paint = Paint()
-    paint.asFrameworkPaint().apply {
+    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         color = fill.toArgb()
         setShadowLayer(blur, dx, dy, shadow.toArgb())
     }
-    drawContext.canvas.drawPath(path, paint)
+    drawContext.canvas.nativeCanvas.drawPath(path.asAndroidPath(), paint)
 }
 
 /** Raised surface: light shadow top-left, dark shadow bottom-right. [brush] paints a gradient face, [glow] tints the dark shadow. */
