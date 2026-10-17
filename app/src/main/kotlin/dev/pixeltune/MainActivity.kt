@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.items
 import android.hardware.display.DisplayManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
@@ -107,7 +108,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+        )
         Shizuku.addRequestPermissionResultListener(listener)
         val hz = runCatching {
             getSystemService(DisplayManager::class.java).getDisplay(0).supportedModes.maxOf { it.refreshRate }.toInt()
@@ -117,7 +121,7 @@ class MainActivity : ComponentActivity() {
         val toggles = Tweaks.toggles(hz)
         val packs = Tweaks.packs(this)
         setContent {
-            MaterialTheme(colorScheme = neuScheme(isSystemInDarkTheme())) {
+            MaterialTheme(colorScheme = neuScheme(false)) {
                 App(status.intValue, hz, actions, toggles, packs, prefs)
             }
         }
@@ -135,10 +139,10 @@ private class Pal(
     val red: Color, val redBg: Color, val amber: Color, val thumb: Color,
 )
 private val Light = Pal(
-    bg = Color(0xFFE8ECF2), hi = Color.White, lo = Color(0xFFBCC5D6), card = Color.Transparent,
-    text = Color(0xFF2B3347), sub = Color(0xFF68728A), line = Color(0xFFBCC5D6).copy(alpha = .55f),
-    blue = Color(0xFF2F6BFF), blueHi = Color(0xFF5B9BFF), cyan = Color(0xFF2BD0E6),
-    red = Color(0xFFD92D20), redBg = Color(0xFFD92D20).copy(alpha = .12f), amber = Color(0xFFF5B800), thumb = Color(0xFFF6F8FC),
+    bg = Color(0xFFF3F5FC), hi = Color.White, lo = Color(0xFF4A5BB5).copy(alpha = .22f), card = Color.White,
+    text = Color(0xFF141B34), sub = Color(0xFF6B7391), line = Color(0xFFE3E8F6),
+    blue = Color(0xFF3B6CFF), blueHi = Color(0xFF8B5CF6), cyan = Color(0xFF14C8F0),
+    red = Color(0xFFE5334B), redBg = Color(0xFFE5334B).copy(alpha = .12f), amber = Color(0xFFFFB020), thumb = Color.White,
 )
 private val Dark = Pal(
     bg = Color(0xFF23262D), hi = Color(0xFF30343D), lo = Color(0xFF15171C), card = Color.Transparent,
@@ -156,7 +160,7 @@ private fun neuScheme(dark: Boolean): ColorScheme {
         primary = p.blue, onPrimary = Color.White,
         background = p.bg, onBackground = p.text,
         surface = p.bg, onSurface = p.text, onSurfaceVariant = p.sub,
-        surfaceContainerHigh = p.bg, surfaceVariant = p.line,
+        surfaceContainerHigh = p.hi, surfaceVariant = p.line,
         outline = p.sub, outlineVariant = p.line,
     )
 }
@@ -165,7 +169,7 @@ private data class Entry(val title: String, val time: Long, val level: Int, val 
 
 @Composable
 fun App(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak>, packs: List<Tweak>, prefs: SharedPreferences) {
-    CompositionLocalProvider(LocalPal provides (if (isSystemInDarkTheme()) Dark else Light)) {
+    CompositionLocalProvider(LocalPal provides Light) {
         Body(status, hz, actions, toggles, packs, prefs)
     }
 }
@@ -370,7 +374,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     }
     fun isOpen(k: String, def: Boolean) = open[k] ?: def
 
-    Box(Modifier.fillMaxSize().background(p.bg)) {
+    Box(Modifier.fillMaxSize().background(p.bg).drawBehind { aurora(p) }) {
     Column(Modifier.fillMaxSize()) {
         Header(status) { showSettings = true }
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 28.dp).clip(RoundedCornerShape(50)), color = p.blue, trackColor = p.line)
@@ -418,11 +422,12 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                                 Text("Phone status", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                                 IconButton(onClick = { statsTick = tick + 1 }) { Icon(Icons.Filled.Refresh, "Refresh", tint = p.sub) }
                             }
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                Stat(Formatter.formatShortFileSize(ctx, mi.availMem), "RAM free")
-                                Stat(Formatter.formatShortFileSize(ctx, sf.availableBytes), "Storage free")
-                                Stat(String.format("%.1f°C", tempC), "Battery $lvl%")
-                            }
+                            Meter("RAM free", "${Formatter.formatShortFileSize(ctx, mi.availMem)} / ${Formatter.formatShortFileSize(ctx, mi.totalMem)}",
+                                mi.availMem / mi.totalMem.toFloat(), Brush.horizontalGradient(listOf(p.cyan, Green)))
+                            Meter("Storage free", "${Formatter.formatShortFileSize(ctx, sf.availableBytes)} / ${Formatter.formatShortFileSize(ctx, sf.totalBytes)}",
+                                sf.availableBytes / sf.totalBytes.toFloat(), Brush.horizontalGradient(listOf(p.blueHi, p.blue)))
+                            Meter("Temperature", String.format("%.1f°C", tempC), tempC / 60f, Brush.horizontalGradient(listOf(p.amber, p.red)))
+                            Meter("Battery", "$lvl%", lvl.coerceAtLeast(0) / 100f, Brush.horizontalGradient(listOf(Green, p.cyan)))
                         }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -431,6 +436,29 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                     }
                     Text("Recommended = faster animations + Compile apps. Compile was the only tweak that measurably sped things up (about 17% faster cold start in WhatsApp). Re-run it after big app updates. Undo it from the Actions tab.",
                         color = p.sub, fontSize = 12.sp)
+                    SectionTitle("Quick actions")
+                    val quick = actions.filter { it.id != "reset" }.take(4)
+                    val qIcons = listOf(Icons.Filled.PlayArrow, Icons.Filled.Refresh, Icons.Filled.Build, Icons.Filled.Settings)
+                    val qColors = listOf(listOf(p.blueHi, p.blue), listOf(p.cyan, Green), listOf(p.amber, p.red), listOf(p.blue, p.cyan))
+                    quick.chunked(2).forEachIndexed { row, items ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            items.forEachIndexed { col, t ->
+                                val k = row * 2 + col
+                                QuickTile(t.title, qIcons[k], Brush.linearGradient(qColors[k]), canRun, Modifier.weight(1f)) { run(t, true) }
+                            }
+                            if (items.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                    if (results.size >= 2) {
+                        SectionTitle("Smoothness trend")
+                        Panel {
+                            Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                                Sparkline(results.take(8).reversed().map { it.jankPct.toFloat() }, Modifier.fillMaxWidth().height(80.dp), p.blueHi)
+                                Spacer(Modifier.height(6.dp))
+                                Text("Jank % over your last ${minOf(results.size, 8)} tests (lower is better)", color = p.sub, fontSize = 12.sp)
+                            }
+                        }
+                    }
                     NeuButton(onClick = { confirmReset = true }, enabled = canRun, modifier = Modifier.fillMaxWidth(), contentColor = p.red) { Text("Reset everything") }
                     LaunchedEffect(Unit) { while (true) { delay(5000); statsTick++ } }
                 }
@@ -691,35 +719,31 @@ private fun DrawScope.neuShadowPath(path: Path, fill: Color, shadow: Color, dx: 
     drawContext.canvas.nativeCanvas.drawPath(path.asAndroidPath(), paint)
 }
 
-/** Raised surface: light shadow top-left, dark shadow bottom-right. [brush] paints a gradient face, [glow] tints the dark shadow. */
+/** Raised card: white face, soft tinted drop shadow, hairline border. [brush] paints a gradient face, [glow] tints the shadow. */
 private fun Modifier.neuRaised(p: Pal, radius: Dp, depth: Dp = 7.dp, brush: Brush? = null, glow: Color? = null): Modifier =
     drawBehind {
         val r = radius.toPx()
         val d = depth.toPx()
-        neuFill(p.bg, glow ?: p.lo, d, d, d * 2f, r)
-        neuFill(p.bg, p.hi, -d, -d, d * 2f, r)
+        neuFill(p.hi, glow ?: p.lo, 0f, d * .9f, d * 2.4f, r)
         if (brush != null) drawRoundRect(brush, cornerRadius = CornerRadius(r))
+        else drawRoundRect(p.line, cornerRadius = CornerRadius(r), style = Stroke(1.dp.toPx()))
     }
 
-/** Pressed-in surface: dark inner shadow top-left, light inner shadow bottom-right. */
+/** Flat tinted well (switch tracks, stat tiles, pressed buttons). */
 private fun Modifier.neuInset(p: Pal, radius: Dp, depth: Dp = 4.dp): Modifier =
     drawBehind {
-        val r = radius.toPx()
-        val d = depth.toPx()
-        val rr = RoundRect(0f, 0f, size.width, size.height, CornerRadius(r))
-        val hole = Path().apply { addRoundRect(rr) }
-        drawRoundRect(p.bg, cornerRadius = CornerRadius(r))
-        clipPath(hole) {
-            val m = 60.dp.toPx()
-            val frame = Path().apply {
-                fillType = PathFillType.EvenOdd
-                addRect(Rect(-m, -m, size.width + m, size.height + m))
-                addRoundRect(rr)
-            }
-            neuShadowPath(frame, p.bg, p.lo, d, d, d * 2f)
-            neuShadowPath(frame, p.bg, p.hi, -d, -d, d * 2f)
-        }
+        drawRoundRect(p.line.copy(alpha = .75f), cornerRadius = CornerRadius(radius.toPx()))
     }
+
+private fun DrawScope.aurora(p: Pal) {
+    fun blob(c: Color, x: Float, y: Float, r: Float) {
+        val o = Offset(size.width * x, size.height * y)
+        drawCircle(Brush.radialGradient(listOf(c.copy(alpha = .28f), Color.Transparent), o, r), r, o)
+    }
+    blob(p.cyan, .95f, .02f, size.width * .8f)
+    blob(Color(0xFF8B5CF6), 0f, .32f, size.width * .75f)
+    blob(Color(0xFF16C79A), .95f, .8f, size.width * .7f)
+}
 
 /** Click with a springy press-in squish and no ripple. */
 private fun Modifier.bounceClick(onClick: () -> Unit): Modifier = composed {
@@ -832,10 +856,7 @@ private fun NeuSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit, enab
 @Composable
 private fun Hairline() {
     val p = LocalPal.current
-    Column(Modifier.fillMaxWidth()) {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(p.line))
-        Box(Modifier.fillMaxWidth().height(1.dp).background(p.hi))
-    }
+    Box(Modifier.fillMaxWidth().height(1.dp).background(p.line))
 }
 
 @Composable
@@ -930,11 +951,13 @@ private fun Ring(frac: Float, big: String, small: String) {
             val sz = Size(size.width - w, size.height - w)
             drawArc(color = p.line, startAngle = 135f, sweepAngle = 270f, useCenter = false,
                 topLeft = Offset(w / 2, w / 2), size = sz, style = Stroke(w, cap = StrokeCap.Round))
-            if (shown > 0.001f) drawArc(
-                brush = Brush.linearGradient(listOf(p.blue, p.cyan), start = Offset(0f, size.height), end = Offset(size.width, 0f)),
-                startAngle = 135f, sweepAngle = 270f * shown, useCenter = false,
-                topLeft = Offset(w / 2, w / 2), size = sz, style = Stroke(w, cap = StrokeCap.Round),
-            )
+            if (shown > 0.001f) {
+                val g = Brush.linearGradient(listOf(p.blueHi, p.blue, p.cyan), start = Offset(0f, size.height), end = Offset(size.width, 0f))
+                drawArc(brush = g, startAngle = 135f, sweepAngle = 270f * shown, useCenter = false, alpha = .22f,
+                    topLeft = Offset(w / 2, w / 2), size = sz, style = Stroke(w + 6.dp.toPx(), cap = StrokeCap.Round))
+                drawArc(brush = g, startAngle = 135f, sweepAngle = 270f * shown, useCenter = false,
+                    topLeft = Offset(w / 2, w / 2), size = sz, style = Stroke(w, cap = StrokeCap.Round))
+            }
         }
         Column(
             Modifier.size(116.dp).neuRaised(p, 58.dp, 8.dp),
@@ -972,5 +995,61 @@ private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    val p = LocalPal.current
+    Text(text, color = p.text, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp))
+}
+
+@Composable
+private fun Meter(title: String, value: String, frac: Float, brush: Brush) {
+    val p = LocalPal.current
+    val f by animateFloatAsState(frac.coerceIn(0f, 1f), tween(700), label = "meter")
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Row {
+            Text(title, color = p.sub, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            Text(value, color = p.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Spacer(Modifier.height(6.dp))
+        Box(Modifier.fillMaxWidth().height(8.dp).clip(CircleShape).background(p.line)) {
+            Box(Modifier.fillMaxWidth(f).fillMaxHeight().clip(CircleShape).background(brush))
+        }
+    }
+}
+
+@Composable
+private fun QuickTile(title: String, icon: ImageVector, brush: Brush, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val p = LocalPal.current
+    Column(
+        modifier.graphicsLayer { alpha = if (enabled) 1f else .45f }
+            .neuRaised(p, 24.dp, 6.dp)
+            .bounceClick { if (enabled) onClick() }
+            .padding(16.dp),
+    ) {
+        Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(brush), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = Color.White, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(title, color = p.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
+    }
+}
+
+@Composable
+private fun Sparkline(values: List<Float>, modifier: Modifier, color: Color) {
+    Canvas(modifier) {
+        if (values.size < 2) return@Canvas
+        val mx = values.maxOrNull() ?: 1f
+        val mn = values.minOrNull() ?: 0f
+        val range = if (mx - mn > 0f) mx - mn else 1f
+        val dx = size.width / (values.size - 1)
+        val ys = values.map { size.height * .88f - (it - mn) / range * size.height * .76f }
+        val line = Path().apply { ys.forEachIndexed { i, y -> if (i == 0) moveTo(0f, y) else lineTo(i * dx, y) } }
+        val fill = Path().apply { addPath(line); lineTo(size.width, size.height); lineTo(0f, size.height); close() }
+        drawPath(fill, Brush.verticalGradient(listOf(color.copy(alpha = .28f), Color.Transparent)))
+        drawPath(line, color, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
+        ys.forEachIndexed { i, y -> drawCircle(color, 4.dp.toPx(), Offset(i * dx, y)) }
     }
 }
