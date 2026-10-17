@@ -42,6 +42,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -56,21 +57,30 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.composed
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.asFrameworkPaint
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -107,7 +117,7 @@ class MainActivity : ComponentActivity() {
         val toggles = Tweaks.toggles(hz)
         val packs = Tweaks.packs(this)
         setContent {
-            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
+            MaterialTheme(colorScheme = neuScheme(isSystemInDarkTheme())) {
                 App(status.intValue, hz, actions, toggles, packs, prefs)
             }
         }
@@ -119,33 +129,37 @@ class MainActivity : ComponentActivity() {
 
 // ---------- palette (light/dark) ----------
 private class Pal(
-    val bgTop: Color, val bgBottom: Color, val blobs: List<Color>,
-    val glass: Color, val glassHi: Color, val edgeHi: Color, val edgeLo: Color,
-    val card: Color, val text: Color, val sub: Color, val line: Color,
-    val blue: Color, val red: Color, val redBg: Color, val amber: Color, val navy: Color, val scrim: Color,
+    val bg: Color, val hi: Color, val lo: Color, val card: Color,
+    val text: Color, val sub: Color, val line: Color,
+    val blue: Color, val blueHi: Color, val cyan: Color,
+    val red: Color, val redBg: Color, val amber: Color, val thumb: Color,
 )
 private val Light = Pal(
-    bgTop = Color(0xFFE6EDFF), bgBottom = Color(0xFFFFF0E4),
-    blobs = listOf(Color(0xFF5B8CFF).copy(alpha = .85f), Color(0xFFB07CFF).copy(alpha = .70f), Color(0xFF4FE3C8).copy(alpha = .60f), Color(0xFFFFA45C).copy(alpha = .65f), Color(0xFFFF7EB6).copy(alpha = .60f)),
-    glass = Color.White.copy(alpha = .30f), glassHi = Color.White.copy(alpha = .55f),
-    edgeHi = Color.White.copy(alpha = .95f), edgeLo = Color.White.copy(alpha = .35f),
-    card = Color.Transparent, text = Color(0xFF14172B), sub = Color(0xFF4B5575), line = Color(0xFF14172B).copy(alpha = .10f),
-    blue = Color(0xFF2F6BFF), red = Color(0xFFD92D20), redBg = Color(0xFFD92D20).copy(alpha = .14f),
-    amber = Color(0xFFF5B800), navy = Color(0xFF0B1020).copy(alpha = .70f), scrim = Color.Transparent,
+    bg = Color(0xFFE8ECF2), hi = Color.White, lo = Color(0xFFBCC5D6), card = Color.Transparent,
+    text = Color(0xFF2B3347), sub = Color(0xFF68728A), line = Color(0xFFBCC5D6).copy(alpha = .55f),
+    blue = Color(0xFF2F6BFF), blueHi = Color(0xFF5B9BFF), cyan = Color(0xFF2BD0E6),
+    red = Color(0xFFD92D20), redBg = Color(0xFFD92D20).copy(alpha = .12f), amber = Color(0xFFF5B800), thumb = Color(0xFFF6F8FC),
 )
 private val Dark = Pal(
-    bgTop = Color(0xFF0B1026), bgBottom = Color(0xFF0A0E1C),
-    blobs = listOf(Color(0xFF3B6BFF).copy(alpha = .80f), Color(0xFF8B5CF6).copy(alpha = .70f), Color(0xFF14B8A6).copy(alpha = .55f), Color(0xFFFF8A4C).copy(alpha = .50f), Color(0xFFEC4899).copy(alpha = .50f)),
-    glass = Color.White.copy(alpha = .05f), glassHi = Color.White.copy(alpha = .12f),
-    edgeHi = Color.White.copy(alpha = .40f), edgeLo = Color.White.copy(alpha = .06f),
-    card = Color.Transparent, text = Color(0xFFF4F6FF), sub = Color(0xFFB4BBD4), line = Color.White.copy(alpha = .14f),
-    blue = Color(0xFF5AA2FF), red = Color(0xFFFF6B63), redBg = Color(0xFFFF6B63).copy(alpha = .18f),
-    amber = Color(0xFFF5B800), navy = Color(0xFF0B1020).copy(alpha = .62f), scrim = Color.Black.copy(alpha = .16f),
+    bg = Color(0xFF23262D), hi = Color(0xFF30343D), lo = Color(0xFF15171C), card = Color.Transparent,
+    text = Color(0xFFE6E9F2), sub = Color(0xFF9AA2B5), line = Color(0xFF15171C).copy(alpha = .70f),
+    blue = Color(0xFF4D8DFF), blueHi = Color(0xFF7BAEFF), cyan = Color(0xFF22D3EE),
+    red = Color(0xFFFF6B63), redBg = Color(0xFFFF6B63).copy(alpha = .16f), amber = Color(0xFFF5B800), thumb = Color(0xFFDDE2EC),
 )
 private val LocalPal = staticCompositionLocalOf { Light }
-private class Fx(val t: State<Float>, val size: State<IntSize>)
-private val LocalFx = staticCompositionLocalOf<Fx?> { null }
 private val Green = Color(0xFF16A34A)
+
+/** Material colours remapped so dialogs, text fields and text buttons follow the neumorphic palette. */
+private fun neuScheme(dark: Boolean): ColorScheme {
+    val p = if (dark) Dark else Light
+    return (if (dark) darkColorScheme() else lightColorScheme()).copy(
+        primary = p.blue, onPrimary = Color.White,
+        background = p.bg, onBackground = p.text,
+        surface = p.bg, onSurface = p.text, onSurfaceVariant = p.sub,
+        surfaceContainerHigh = p.bg, surfaceVariant = p.line,
+        outline = p.sub, outlineVariant = p.line,
+    )
+}
 
 private data class Entry(val title: String, val time: Long, val level: Int, val label: String, val summary: String)
 
@@ -170,13 +184,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     var resPick by remember { mutableStateOf(90) }
     var resConfirm by remember { mutableStateOf(0) }
     var keepNotif by remember { mutableStateOf(prefs.getBoolean("keep_notif", true)) }
-    var liquid by remember { mutableStateOf(prefs.getBoolean("fx_anim", true)) }
     var resetOnBoot by remember { mutableStateOf(prefs.getBoolean("reset_on_boot", true)) }
-    val tState: State<Float> = if (liquid) {
-        rememberInfiniteTransition(label = "liquid").animateFloat(0f, 1f, infiniteRepeatable(tween(60000, easing = LinearEasing)), label = "t")
-    } else remember { mutableStateOf(.15f) }
-    val sizeState = remember { mutableStateOf(IntSize.Zero) }
-    val fx = remember(liquid) { Fx(tState, sizeState) }
     val open = remember { mutableStateMapOf<String, Boolean>() }
     val history = remember { mutableStateListOf<Entry>() }
     val on = remember {
@@ -362,18 +370,17 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     }
     fun isOpen(k: String, def: Boolean) = open[k] ?: def
 
-    CompositionLocalProvider(LocalFx provides fx) {
-    Box(Modifier.fillMaxSize().onSizeChanged { sizeState.value = it }.drawBehind { drawScene(p, tState.value, size.width, size.height) }) {
+    Box(Modifier.fillMaxSize().background(p.bg)) {
     Column(Modifier.fillMaxSize()) {
         Header(status) { showSettings = true }
-        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp), color = p.blue, trackColor = p.line)
+        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 28.dp).clip(RoundedCornerShape(50)), color = p.blue, trackColor = p.line)
         AnimatedContent(
             targetState = tab, modifier = Modifier.weight(1f), label = "tab",
             transitionSpec = { (fadeIn(tween(240)) + slideInVertically(tween(240)) { it / 20 }) togetherWith fadeOut(tween(120)) },
         ) { cur ->
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             when (cur) {
                 0 -> {
@@ -385,11 +392,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                             if (status == 1) "Grant Shizuku access" else "Shizuku isn't running",
                             if (status == 1) "PixelTune needs permission to run commands." else "Start Shizuku (Wireless debugging), then reopen this app.",
                         )
-                        if (status == 1) Button(
-                            onClick = { runCatching { Shizuku.requestPermission(1) } },
-                            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
-                        ) { Text("Grant access") }
+                        if (status == 1) NeuButton(onClick = { runCatching { Shizuku.requestPermission(1) } }, modifier = Modifier.fillMaxWidth(), primary = true) { Text("Grant access") }
                     }
                     Panel {
                         Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -422,24 +425,13 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                             }
                         }
                     }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        OutlinedButton(
-                            onClick = { runMany((toggles + packs).filter { on[it.id] == true }.map { it to false }) },
-                            enabled = canRun && activeOn > 0, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
-                            border = BorderStroke(1.dp, Brush.linearGradient(listOf(p.edgeHi, p.edgeLo))), colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
-                        ) { Text("Turn all off") }
-                        Button(
-                            onClick = { runMany(listOfNotNull(animTweak?.takeIf { on[it.id] != true }?.let { it to true }, aotAction?.let { it to true })) },
-                            enabled = canRun, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
-                        ) { Text("Apply recommended") }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                        NeuButton(onClick = { runMany((toggles + packs).filter { on[it.id] == true }.map { it to false }) }, enabled = canRun && activeOn > 0, modifier = Modifier.weight(1f)) { Text("Turn all off") }
+                        NeuButton(onClick = { runMany(listOfNotNull(animTweak?.takeIf { on[it.id] != true }?.let { it to true }, aotAction?.let { it to true })) }, enabled = canRun, modifier = Modifier.weight(1f), primary = true) { Text("Apply recommended") }
                     }
                     Text("Recommended = faster animations + Compile apps. Compile was the only tweak that measurably sped things up (about 17% faster cold start in WhatsApp). Re-run it after big app updates. Undo it from the Actions tab.",
                         color = p.sub, fontSize = 12.sp)
-                    OutlinedButton(
-                        onClick = { confirmReset = true }, enabled = canRun, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
-                        border = BorderStroke(1.dp, p.red.copy(alpha = .55f)), colors = ButtonDefaults.outlinedButtonColors(contentColor = p.red),
-                    ) { Text("Reset everything") }
+                    NeuButton(onClick = { confirmReset = true }, enabled = canRun, modifier = Modifier.fillMaxWidth(), contentColor = p.red) { Text("Reset everything") }
                     LaunchedEffect(Unit) { while (true) { delay(5000); statsTick++ } }
                 }
                 1 -> {
@@ -453,11 +445,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                                     Text(t.desc, color = p.sub, fontSize = 13.sp)
                                     if (t.note.isNotBlank()) Text("Note: ${t.note}", color = p.sub, fontSize = 12.sp)
                                 }
-                                Button(
-                                    onClick = { run(t, true) }, enabled = canRun, shape = RoundedCornerShape(50),
-                                    colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
-                                    contentPadding = PaddingValues(horizontal = 18.dp),
-                                ) { Text("Run") }
+                                NeuButton(onClick = { run(t, true) }, enabled = canRun, primary = true) { Text("Run") }
                             }
                         }
                     }
@@ -469,15 +457,9 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                             color = p.sub, fontSize = 13.sp)
                         val names = apps.associate { it.second to it.first }
                         Text(if (sel.isEmpty()) "No apps chosen yet." else sel.joinToString(", ") { names[it] ?: it }, color = p.text, fontSize = 14.sp)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            OutlinedButton(
-                                onClick = { pickAlive = false; showSelPicker = true }, enabled = canRun, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
-                                border = BorderStroke(1.dp, Brush.linearGradient(listOf(p.edgeHi, p.edgeLo))), colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
-                            ) { Text("Choose apps") }
-                            Button(
-                                onClick = { run(selTweak(), true) }, enabled = canRun && sel.isNotEmpty(), modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
-                            ) { Text("Compile") }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                            NeuButton(onClick = { pickAlive = false; showSelPicker = true }, enabled = canRun, modifier = Modifier.weight(1f)) { Text("Choose apps") }
+                            NeuButton(onClick = { run(selTweak(), true) }, enabled = canRun && sel.isNotEmpty(), modifier = Modifier.weight(1f), primary = true) { Text("Compile") }
                         }
                         if (sel.isNotEmpty()) TextButton(onClick = { run(selTweak(), false) }, enabled = canRun) { Text("Reset these apps", color = p.sub) }
                     }
@@ -489,16 +471,9 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                             color = p.sub, fontSize = 13.sp)
                         val anames = apps.associate { it.second to it.first }
                         Text(if (alive.isEmpty()) "No apps chosen yet." else alive.joinToString(", ") { anames[it] ?: it }, color = p.text, fontSize = 14.sp)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            OutlinedButton(
-                                onClick = { pickAlive = true; showSelPicker = true }, enabled = canRun, modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, Brush.linearGradient(listOf(p.edgeHi, p.edgeLo))),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
-                            ) { Text("Choose apps") }
-                            Button(
-                                onClick = { run(aliveTweak(), true) }, enabled = canRun && alive.isNotEmpty(), modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
-                            ) { Text("Allow") }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                            NeuButton(onClick = { pickAlive = true; showSelPicker = true }, enabled = canRun, modifier = Modifier.weight(1f)) { Text("Choose apps") }
+                            NeuButton(onClick = { run(aliveTweak(), true) }, enabled = canRun && alive.isNotEmpty(), modifier = Modifier.weight(1f), primary = true) { Text("Allow") }
                         }
                         if (alive.isNotEmpty()) TextButton(onClick = { run(aliveTweak(), false) }, enabled = canRun) { Text("Reset these apps", color = p.sub) }
                     }
@@ -518,23 +493,12 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                             Text("Draws the whole screen at a lower resolution and scales it up. Less GPU work means cooler and smoother in heavy games, " +
                                 "but a softer picture. Open apps may restart when it changes. A 15-second timer reverts it unless you tap Keep.",
                                 color = p.sub, fontSize = 13.sp)
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf(100, 90, 80, 70).forEach { v ->
-                                    Text("$v%", fontSize = 14.sp, color = if (resPick == v) Color.White else p.text,
-                                        modifier = Modifier.clip(RoundedCornerShape(50)).background(if (resPick == v) p.blue else p.line)
-                                            .clickable { resPick = v }.padding(horizontal = 16.dp, vertical = 8.dp))
-                                }
+                            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                listOf(100, 90, 80, 70).forEach { v -> NeuChoice("$v%", resPick == v) { resPick = v } }
                             }
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Button(
-                                    onClick = { applyRes(resPick) }, enabled = canRun && resPick != resScale, modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
-                                ) { Text(if (resPick >= 100) "Restore native" else "Apply $resPick%") }
-                                OutlinedButton(
-                                    onClick = { applyRes(100) }, enabled = canRun && resScale < 100, modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, Brush.linearGradient(listOf(p.edgeHi, p.edgeLo))),
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
-                                ) { Text("Reset display size") }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                                NeuButton(onClick = { applyRes(resPick) }, enabled = canRun && resPick != resScale, modifier = Modifier.weight(1f), primary = true) { Text(if (resPick >= 100) "Restore native" else "Apply $resPick%") }
+                                NeuButton(onClick = { applyRes(100) }, enabled = canRun && resScale < 100, modifier = Modifier.weight(1f)) { Text("Reset display size") }
                             }
                         }
                     }
@@ -558,10 +522,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                                 Text("App: $benchLabel", color = p.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
                                 TextButton(onClick = { showPicker = true }, enabled = canRun) { Text("Change", color = p.blue) }
                             }
-                            Button(
-                                onClick = { runBench() }, enabled = canRun, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = p.blue, contentColor = Color.White),
-                            ) { Text(if (benching) benchMsg else "Run test") }
+                            NeuButton(onClick = { runBench() }, enabled = canRun, modifier = Modifier.fillMaxWidth(), primary = true) { Text(if (benching) benchMsg else "Run test") }
                             if (!benching && benchMsg.isNotBlank()) Text(benchMsg, color = p.sub, fontSize = 12.sp)
                         }
                     }
@@ -589,10 +550,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                         )
                     }
                     if (results.size >= 2) Text("Changes under about 10% (or 20 ms, or 3 points of jank) are treated as noise.", color = p.sub, fontSize = 12.sp)
-                    if (results.isNotEmpty()) OutlinedButton(
-                        onClick = { results.clear(); Bench.save(prefs, results) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
-                        border = BorderStroke(1.dp, Brush.linearGradient(listOf(p.edgeHi, p.edgeLo))), colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
-                    ) { Text("Clear results") }
+                    if (results.isNotEmpty()) NeuButton(onClick = { results.clear(); Bench.save(prefs, results) }, modifier = Modifier.fillMaxWidth()) { Text("Clear results") }
                 }
                 else -> {
                     if (history.isEmpty()) IssueCard("Nothing yet", p.sub, p.card, "", "No runs this session", "Run an action or switch a tweak on. Full logs are saved to Download/PixelTune.")
@@ -605,17 +563,13 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                             if (mins < 1) "Just now" else "$mins min ago", e.title, e.summary,
                         )
                     }
-                    if (history.isNotEmpty()) OutlinedButton(
-                        onClick = { history.clear() }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
-                        border = BorderStroke(1.dp, Brush.linearGradient(listOf(p.edgeHi, p.edgeLo))), colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
-                    ) { Text("Clear history") }
+                    if (history.isNotEmpty()) NeuButton(onClick = { history.clear() }, modifier = Modifier.fillMaxWidth()) { Text("Clear history") }
                 }
             }
             Spacer(Modifier.height(8.dp))
         }
         }
         BottomNav(tab) { tab = it }
-    }
     }
     }
 
@@ -634,7 +588,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
         text = {
             Column {
                 OutlinedTextField(value = selQuery, onValueChange = { selQuery = it }, singleLine = true,
-                    placeholder = { Text("Search") }, modifier = Modifier.fillMaxWidth())
+                    placeholder = { Text("Search") }, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth())
                 Row(Modifier.fillMaxWidth().clickable { userOnly = !userOnly }, verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = userOnly, onCheckedChange = { userOnly = it }, colors = CheckboxDefaults.colors(checkedColor = p.blue))
                     Text("User apps only", fontSize = 14.sp)
@@ -702,15 +656,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                         Text("Keep notifications untouched", fontWeight = FontWeight.Medium)
                         Text("Skips tweaks that change notification features and standby limits.", fontSize = 13.sp)
                     }
-                    Switch(checked = keepNotif, onCheckedChange = { keepNotif = it; prefs.edit().putBoolean("keep_notif", it).apply() })
-                }
-                Spacer(Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                        Text("Liquid animation", fontWeight = FontWeight.Medium)
-                        Text("Animated glass background. Turn off to save battery and heat.", fontSize = 13.sp)
-                    }
-                    Switch(checked = liquid, onCheckedChange = { liquid = it; prefs.edit().putBoolean("fx_anim", it).apply() })
+                    NeuSwitch(checked = keepNotif, onCheckedChange = { keepNotif = it; prefs.edit().putBoolean("keep_notif", it).apply() })
                 }
                 Spacer(Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -718,7 +664,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                         Text("Reset tweaks after reboot", fontWeight = FontWeight.Medium)
                         Text("After each reboot, turns every tweak off again once Shizuku starts. Compile is left alone.", fontSize = 13.sp)
                     }
-                    Switch(checked = resetOnBoot, onCheckedChange = { resetOnBoot = it; prefs.edit().putBoolean("reset_on_boot", it).apply() })
+                    NeuSwitch(checked = resetOnBoot, onCheckedChange = { resetOnBoot = it; prefs.edit().putBoolean("reset_on_boot", it).apply() })
                 }
                 Spacer(Modifier.height(12.dp))
                 Text("Logs are saved to Download/PixelTune · v$ver", fontSize = 12.sp)
@@ -728,88 +674,54 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     )
 }
 
-// ---------- building blocks ----------
-@Composable
-private fun Header(status: Int, onGear: () -> Unit) {
-    val p = LocalPal.current
-    val pulse = rememberInfiniteTransition(label = "pulse").animateFloat(0.45f, 1f, infiniteRepeatable(tween(1100), RepeatMode.Reverse), label = "pulseA")
-    Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(46.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
-            Image(painterResource(R.drawable.ic_launcher_foreground), null, Modifier.requiredSize(80.dp))
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text("PixelTune", color = p.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(8.dp).graphicsLayer { alpha = pulse.value }.clip(CircleShape).background(when (status) { 2 -> Green; 1 -> p.amber; else -> p.red }))
-                Spacer(Modifier.width(6.dp))
-                Text(when (status) { 2 -> "Shizuku connected"; 1 -> "Needs permission"; else -> "Shizuku not running" }, color = p.sub, fontSize = 13.sp)
+// ---------- neumorphism primitives ----------
+private fun DrawScope.neuFill(fill: Color, shadow: Color, dx: Float, dy: Float, blur: Float, r: Float) {
+    val paint = Paint()
+    paint.asFrameworkPaint().apply {
+        color = fill.toArgb()
+        setShadowLayer(blur, dx, dy, shadow.toArgb())
+    }
+    drawContext.canvas.drawRoundRect(0f, 0f, size.width, size.height, r, r, paint)
+}
+
+private fun DrawScope.neuShadowPath(path: Path, fill: Color, shadow: Color, dx: Float, dy: Float, blur: Float) {
+    val paint = Paint()
+    paint.asFrameworkPaint().apply {
+        color = fill.toArgb()
+        setShadowLayer(blur, dx, dy, shadow.toArgb())
+    }
+    drawContext.canvas.drawPath(path, paint)
+}
+
+/** Raised surface: light shadow top-left, dark shadow bottom-right. [brush] paints a gradient face, [glow] tints the dark shadow. */
+private fun Modifier.neuRaised(p: Pal, radius: Dp, depth: Dp = 7.dp, brush: Brush? = null, glow: Color? = null): Modifier =
+    drawBehind {
+        val r = radius.toPx()
+        val d = depth.toPx()
+        neuFill(p.bg, glow ?: p.lo, d, d, d * 2f, r)
+        neuFill(p.bg, p.hi, -d, -d, d * 2f, r)
+        if (brush != null) drawRoundRect(brush, cornerRadius = CornerRadius(r))
+    }
+
+/** Pressed-in surface: dark inner shadow top-left, light inner shadow bottom-right. */
+private fun Modifier.neuInset(p: Pal, radius: Dp, depth: Dp = 4.dp): Modifier =
+    drawBehind {
+        val r = radius.toPx()
+        val d = depth.toPx()
+        val rr = RoundRect(0f, 0f, size.width, size.height, CornerRadius(r))
+        val hole = Path().apply { addRoundRect(rr) }
+        drawRoundRect(p.bg, cornerRadius = CornerRadius(r))
+        clipPath(hole) {
+            val m = 60.dp.toPx()
+            val frame = Path().apply {
+                fillType = PathFillType.EvenOdd
+                addRect(Rect(-m, -m, size.width + m, size.height + m))
+                addRoundRect(rr)
             }
+            neuShadowPath(frame, p.bg, p.lo, d, d, d * 2f)
+            neuShadowPath(frame, p.bg, p.hi, -d, -d, d * 2f)
         }
-        IconButton(onClick = onGear) { Icon(Icons.Filled.Settings, "Settings", tint = p.sub) }
     }
-}
-
-@Composable
-private fun Panel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    GlassBox(modifier, 26.dp, Color.Transparent, content)
-}
-
-/** Liquid glass: a blurred slice of the animated backdrop, a tint, a bright rim and a specular glow. */
-@Composable
-private fun GlassBox(modifier: Modifier, radius: Dp, tint: Color, content: @Composable ColumnScope.() -> Unit) {
-    val p = LocalPal.current
-    val fx = LocalFx.current
-    val shape = RoundedCornerShape(radius)
-    val blur = remember { BlurEffect(40f, 40f, TileMode.Clamp) }
-    var pos by remember { mutableStateOf(Offset.Zero) }
-    Box(modifier.fillMaxWidth().clip(shape).onGloballyPositioned { pos = it.positionInRoot() }) {
-        if (fx != null) Box(
-            Modifier.matchParentSize()
-                .graphicsLayer { renderEffect = blur; clip = true }
-                .drawBehind {
-                    val sz = fx.size.value
-                    translate(-pos.x, -pos.y) { drawScene(p, fx.t.value, sz.width.toFloat(), sz.height.toFloat()) }
-                },
-        )
-        Box(Modifier.matchParentSize().background(p.scrim).background(Brush.linearGradient(listOf(p.glassHi, p.glass))).background(tint))
-        Column(content = content)
-        Box(
-            Modifier.matchParentSize().drawBehind {
-                val r = radius.toPx()
-                drawRoundRect(
-                    Brush.linearGradient(listOf(p.edgeHi, Color.Transparent, p.edgeLo), start = Offset.Zero, end = Offset(size.width, size.height)),
-                    cornerRadius = CornerRadius(r), style = Stroke(1.5.dp.toPx()),
-                )
-                val i = 3.dp.toPx()
-                drawRoundRect(
-                    Color.White.copy(alpha = .07f), topLeft = Offset(i, i), size = Size(size.width - 2 * i, size.height - 2 * i),
-                    cornerRadius = CornerRadius(r - i), style = Stroke(2.dp.toPx()),
-                )
-                drawRoundRect(
-                    Brush.radialGradient(listOf(Color.White.copy(alpha = .20f), Color.Transparent), center = Offset(size.width * .12f, 0f), radius = size.width * .55f),
-                    cornerRadius = CornerRadius(r),
-                )
-            },
-        )
-    }
-}
-
-/** The animated backdrop: a gradient with slowly drifting colored orbs (all drawn, no bitmaps). */
-private fun DrawScope.drawScene(p: Pal, t: Float, w: Float, h: Float) {
-    if (w <= 0f || h <= 0f) return
-    drawRect(Brush.verticalGradient(listOf(p.bgTop, p.bgBottom), startY = 0f, endY = h), size = Size(w, h))
-    val a = t * 2f * PI.toFloat()
-    fun orb(c: Color, cx: Float, cy: Float, r: Float) = drawCircle(
-        Brush.radialGradient(listOf(c, c.copy(alpha = c.alpha * .5f), Color.Transparent), center = Offset(cx, cy), radius = r),
-        radius = r, center = Offset(cx, cy),
-    )
-    orb(p.blobs[0], w * (.22f + .16f * sin(a)), h * (.16f + .06f * cos(2 * a)), w * .75f)
-    orb(p.blobs[1], w * (.85f + .10f * cos(a)), h * (.40f + .10f * sin(2 * a)), w * .70f)
-    orb(p.blobs[2], w * (.15f + .12f * cos(3 * a)), h * (.70f + .08f * sin(a)), w * .80f)
-    orb(p.blobs[3], w * (.80f + .12f * sin(2 * a)), h * (.92f + .04f * cos(a)), w * .70f)
-    orb(p.blobs[4], w * (.50f + .20f * sin(3 * a)), h * (.55f + .10f * cos(2 * a)), w * .45f)
-}
 
 /** Click with a springy press-in squish and no ripple. */
 private fun Modifier.bounceClick(onClick: () -> Unit): Modifier = composed {
@@ -819,8 +731,114 @@ private fun Modifier.bounceClick(onClick: () -> Unit): Modifier = composed {
     this.graphicsLayer { scaleX = s.value; scaleY = s.value }.clickable(interactionSource = src, indication = null, onClick = onClick)
 }
 
+// ---------- building blocks ----------
 @Composable
-private fun Hairline() { Box(Modifier.fillMaxWidth().height(1.dp).background(LocalPal.current.line)) }
+private fun Header(status: Int, onGear: () -> Unit) {
+    val p = LocalPal.current
+    val pulse = rememberInfiniteTransition(label = "pulse").animateFloat(0.45f, 1f, infiniteRepeatable(tween(1100), RepeatMode.Reverse), label = "pulseA")
+    Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 24.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(48.dp).neuRaised(p, 24.dp, 5.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
+            Image(painterResource(R.drawable.ic_launcher_foreground), null, Modifier.requiredSize(84.dp))
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text("PixelTune", color = p.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(8.dp).graphicsLayer { alpha = pulse.value }.clip(CircleShape).background(when (status) { 2 -> Green; 1 -> p.amber; else -> p.red }))
+                Spacer(Modifier.width(6.dp))
+                Text(when (status) { 2 -> "Shizuku connected"; 1 -> "Needs permission"; else -> "Shizuku not running" }, color = p.sub, fontSize = 13.sp)
+            }
+        }
+        Box(Modifier.size(46.dp).neuRaised(p, 23.dp, 5.dp).clip(CircleShape).bounceClick(onGear), contentAlignment = Alignment.Center) {
+            Icon(Icons.Filled.Settings, "Settings", tint = p.sub, modifier = Modifier.size(22.dp))
+        }
+    }
+}
+
+@Composable
+private fun Panel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val p = LocalPal.current
+    Column(modifier.fillMaxWidth().neuRaised(p, 28.dp, 8.dp), content = content)
+}
+
+/** Pill button. Soft = raised and presses in; primary = blue gradient face. */
+@Composable
+private fun NeuButton(
+    onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true,
+    primary: Boolean = false, contentColor: Color? = null, content: @Composable RowScope.() -> Unit,
+) {
+    val p = LocalPal.current
+    val src = remember { MutableInteractionSource() }
+    val pressed by src.collectIsPressedAsState()
+    val fg = when { primary -> Color.White; contentColor != null -> contentColor; else -> p.text }
+    val look = when {
+        primary -> Modifier.neuRaised(p, 28.dp, if (pressed) 3.dp else 6.dp, Brush.linearGradient(listOf(p.blueHi, p.blue)), p.blue.copy(alpha = .45f))
+        pressed -> Modifier.neuInset(p, 28.dp, 4.dp)
+        else -> Modifier.neuRaised(p, 28.dp, 6.dp)
+    }
+    Row(
+        modifier.graphicsLayer { alpha = if (enabled) 1f else .45f }
+            .then(look)
+            .clickable(interactionSource = src, indication = null, enabled = enabled, onClick = onClick)
+            .padding(horizontal = 22.dp, vertical = 14.dp),
+        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CompositionLocalProvider(LocalContentColor provides fg) {
+            ProvideTextStyle(MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)) { content() }
+        }
+    }
+}
+
+/** Selectable pill: raised when off, pressed-in with blue text when selected. */
+@Composable
+private fun NeuChoice(text: String, selected: Boolean, onClick: () -> Unit) {
+    val p = LocalPal.current
+    Text(
+        text, fontSize = 14.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        color = if (selected) p.blue else p.text,
+        modifier = (if (selected) Modifier.neuInset(p, 22.dp, 3.dp) else Modifier.neuRaised(p, 22.dp, 4.dp))
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 9.dp),
+    )
+}
+
+/** Pressed-in track with a raised thumb; the track fills with the blue gradient when on. */
+@Composable
+private fun NeuSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit, enabled: Boolean = true) {
+    val p = LocalPal.current
+    val f by animateFloatAsState(if (checked) 1f else 0f, spring(dampingRatio = .7f, stiffness = 500f), label = "switch")
+    Box(
+        Modifier.graphicsLayer { alpha = if (enabled) 1f else .5f }
+            .size(width = 58.dp, height = 32.dp)
+            .toggleable(
+                value = checked, enabled = enabled, role = Role.Switch,
+                interactionSource = remember { MutableInteractionSource() }, indication = null, onValueChange = onCheckedChange,
+            )
+            .neuInset(p, 16.dp, 3.dp)
+            .drawBehind {
+                val a = f.coerceIn(0f, 1f)
+                if (a > 0f) drawRoundRect(
+                    Brush.horizontalGradient(listOf(p.blue, p.cyan)),
+                    cornerRadius = CornerRadius(size.height / 2f), alpha = a * .9f,
+                )
+            },
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Box(
+            Modifier.offset { IntOffset((4.dp + 26.dp * f).roundToPx(), 0) }
+                .size(24.dp).neuRaised(p, 12.dp, 3.dp).clip(CircleShape).background(p.thumb),
+        )
+    }
+}
+
+@Composable
+private fun Hairline() {
+    val p = LocalPal.current
+    Column(Modifier.fillMaxWidth()) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(p.line))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(p.hi))
+    }
+}
 
 @Composable
 private fun Chip(text: String, bg: Color, fg: Color) {
@@ -840,9 +858,11 @@ private fun Accordion(
     Panel {
         Row(
             Modifier.fillMaxWidth().bounceClick(onToggle).padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Icon(icon, null, tint = p.sub, modifier = Modifier.size(22.dp))
+            Box(Modifier.size(40.dp).neuRaised(p, 20.dp, 4.dp), contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = p.blue, modifier = Modifier.size(20.dp))
+            }
             Text(title, color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
             badges()
             Icon(if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, null, tint = p.sub)
@@ -869,54 +889,60 @@ private fun ToggleRow(t: Tweak, checked: Boolean, enabled: Boolean, onChange: (B
             Text(t.desc, color = p.sub, fontSize = 13.sp)
             if (t.note.isNotBlank()) Text("Note: ${t.note}", color = p.sub, fontSize = 12.sp)
         }
-        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled,
-            colors = SwitchDefaults.colors(checkedTrackColor = p.blue, checkedThumbColor = Color.White))
+        NeuSwitch(checked = checked, onCheckedChange = onChange, enabled = enabled)
     }
 }
 
 @Composable
 private fun IssueCard(label: String, color: Color, bg: Color, time: String, title: String, body: String = "") {
     val p = LocalPal.current
-    GlassBox(Modifier, 20.dp, bg) {
-        Column(Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(color))
-                Spacer(Modifier.width(6.dp))
-                Text(label, color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                Text(time, color = p.sub, fontSize = 12.sp)
-            }
-            Text(title, color = p.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
-            if (body.isNotBlank()) Text(body, color = p.sub, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+    val shape = RoundedCornerShape(24.dp)
+    Column(Modifier.fillMaxWidth().neuRaised(p, 24.dp, 7.dp).clip(shape).background(bg).padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(color))
+            Spacer(Modifier.width(6.dp))
+            Text(label, color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+            Text(time, color = p.sub, fontSize = 12.sp)
         }
+        Text(title, color = p.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+        if (body.isNotBlank()) Text(body, color = p.sub, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
     }
 }
 
 @Composable
 private fun Stat(value: String, label: String) {
     val p = LocalPal.current
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        Modifier.neuInset(p, 18.dp, 4.dp).padding(horizontal = 14.dp, vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Text(value, color = p.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         Text(label, color = p.sub, fontSize = 12.sp)
     }
 }
 
+/** Gauge: gradient arc on a pressed-in track, with a raised disc in the middle. */
 @Composable
 private fun Ring(frac: Float, big: String, small: String) {
     val p = LocalPal.current
     val shown by animateFloatAsState(frac, spring(dampingRatio = .6f, stiffness = 120f), label = "ring")
-    Box(Modifier.size(170.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(190.dp), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
-            val w = 16.dp.toPx()
+            val w = 14.dp.toPx()
             val sz = Size(size.width - w, size.height - w)
             drawArc(color = p.line, startAngle = 135f, sweepAngle = 270f, useCenter = false,
                 topLeft = Offset(w / 2, w / 2), size = sz, style = Stroke(w, cap = StrokeCap.Round))
-            if (shown > 0.001f) drawArc(color = p.blue.copy(alpha = .28f), startAngle = 135f, sweepAngle = 270f * shown, useCenter = false,
-                topLeft = Offset(w / 2, w / 2), size = sz, style = Stroke(w * 1.8f, cap = StrokeCap.Round))
-            if (shown > 0.001f) drawArc(color = p.blue, startAngle = 135f, sweepAngle = 270f * shown, useCenter = false,
-                topLeft = Offset(w / 2, w / 2), size = sz, style = Stroke(w, cap = StrokeCap.Round))
+            if (shown > 0.001f) drawArc(
+                brush = Brush.linearGradient(listOf(p.blue, p.cyan), start = Offset(0f, size.height), end = Offset(size.width, 0f)),
+                startAngle = 135f, sweepAngle = 270f * shown, useCenter = false,
+                topLeft = Offset(w / 2, w / 2), size = sz, style = Stroke(w, cap = StrokeCap.Round),
+            )
         }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(big, fontSize = 34.sp, fontWeight = FontWeight.SemiBold, color = p.text)
+        Column(
+            Modifier.size(116.dp).neuRaised(p, 58.dp, 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+        ) {
+            Text(big, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, color = p.text)
             Text(small, fontSize = 13.sp, color = p.sub)
         }
     }
@@ -927,27 +953,23 @@ private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
     val p = LocalPal.current
     val tabs = listOf("Home" to Icons.Filled.Home, "Actions" to Icons.Filled.PlayArrow, "Tweaks" to Icons.Filled.Build, "Measure" to Icons.Filled.Search, "Log" to Icons.Filled.Info)
     val idx = animateFloatAsState(selected.toFloat(), spring(dampingRatio = .55f, stiffness = 260f), label = "navIdx")
-    Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        GlassBox(Modifier, 32.dp, Color.Transparent) {
-            BoxWithConstraints(Modifier.fillMaxWidth().padding(6.dp)) {
-                val itemW = constraints.maxWidth / tabs.size.toFloat()
-                Box(
-                    Modifier.offset { IntOffset((itemW * idx.value).roundToInt(), 0) }
-                        .width(maxWidth / tabs.size).height(60.dp)
-                        .clip(RoundedCornerShape(26.dp))
-                        .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = .30f), Color.White.copy(alpha = .08f))))
-                        .border(1.dp, Brush.linearGradient(listOf(Color.White.copy(alpha = .7f), Color.White.copy(alpha = .1f))), RoundedCornerShape(26.dp)),
-                )
-                Row(Modifier.fillMaxWidth().height(60.dp)) {
-                    tabs.forEachIndexed { i, (label, icon) ->
-                        val c = if (i == selected) p.text else p.sub
-                        Column(
-                            Modifier.weight(1f).fillMaxHeight().bounceClick { onSelect(i) },
-                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
-                        ) {
-                            Icon(icon, label, tint = c, modifier = Modifier.size(24.dp))
-                            Text(label, fontSize = 11.sp, color = c)
-                        }
+    Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 22.dp, vertical = 14.dp)) {
+        BoxWithConstraints(Modifier.fillMaxWidth().neuRaised(p, 32.dp, 8.dp).padding(6.dp)) {
+            val itemW = constraints.maxWidth / tabs.size.toFloat()
+            Box(
+                Modifier.offset { IntOffset((itemW * idx.value).roundToInt(), 0) }
+                    .width(maxWidth / tabs.size).height(60.dp)
+                    .neuRaised(p, 26.dp, 3.dp, Brush.linearGradient(listOf(p.blueHi, p.blue)), p.blue.copy(alpha = .45f)),
+            )
+            Row(Modifier.fillMaxWidth().height(60.dp)) {
+                tabs.forEachIndexed { i, (label, icon) ->
+                    val c = if (i == selected) Color.White else p.sub
+                    Column(
+                        Modifier.weight(1f).fillMaxHeight().bounceClick { onSelect(i) },
+                        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+                    ) {
+                        Icon(icon, label, tint = c, modifier = Modifier.size(24.dp))
+                        Text(label, fontSize = 11.sp, color = c, fontWeight = if (i == selected) FontWeight.SemiBold else FontWeight.Normal)
                     }
                 }
             }
