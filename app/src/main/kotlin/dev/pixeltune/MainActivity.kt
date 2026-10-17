@@ -84,6 +84,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -137,12 +138,14 @@ private class Pal(
     val text: Color, val sub: Color, val line: Color,
     val blue: Color, val blueHi: Color, val cyan: Color,
     val red: Color, val redBg: Color, val amber: Color, val thumb: Color,
+    val face: Color = bg,
 )
 private val Light = Pal(
-    bg = Color(0xFFF3F5FC), hi = Color.White, lo = Color(0xFF4A5BB5).copy(alpha = .22f), card = Color.White,
-    text = Color(0xFF141B34), sub = Color(0xFF6B7391), line = Color(0xFFE3E8F6),
-    blue = Color(0xFF3B6CFF), blueHi = Color(0xFF8B5CF6), cyan = Color(0xFF14C8F0),
-    red = Color(0xFFE5334B), redBg = Color(0xFFE5334B).copy(alpha = .12f), amber = Color(0xFFFFB020), thumb = Color.White,
+    bg = Color(0xFFE7ECF4), hi = Color.White, lo = Color(0xFFBFC9DC), card = Color.Transparent,
+    text = Color(0xFF1B2440), sub = Color(0xFF6F7893), line = Color(0xFFBFC9DC).copy(alpha = .55f),
+    blue = Color(0xFF2F6BFF), blueHi = Color(0xFF5B9BFF), cyan = Color(0xFF2BD0E6),
+    red = Color(0xFFD92D20), redBg = Color(0xFFD92D20).copy(alpha = .12f), amber = Color(0xFFF5B800), thumb = Color(0xFFF6F8FC),
+    face = Color(0xFFF2F5FB),
 )
 private val Dark = Pal(
     bg = Color(0xFF23262D), hi = Color(0xFF30343D), lo = Color(0xFF15171C), card = Color.Transparent,
@@ -160,7 +163,7 @@ private fun neuScheme(dark: Boolean): ColorScheme {
         primary = p.blue, onPrimary = Color.White,
         background = p.bg, onBackground = p.text,
         surface = p.bg, onSurface = p.text, onSurfaceVariant = p.sub,
-        surfaceContainerHigh = p.hi, surfaceVariant = p.line,
+        surfaceContainerHigh = p.face, surfaceVariant = p.line,
         outline = p.sub, outlineVariant = p.line,
     )
 }
@@ -401,6 +404,11 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                     Panel {
                         Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Ring(if (total == 0) 0f else activeOn / total.toFloat(), "$activeOn/$total", "tweaks on")
+                            Spacer(Modifier.height(12.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                                LegendDot(p.blue, "On: $activeOn")
+                                LegendDot(p.sub.copy(alpha = .45f), "Off: ${total - activeOn}")
+                            }
                             Spacer(Modifier.height(16.dp))
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                                 Stat("$hz Hz", "Display")
@@ -422,12 +430,13 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                                 Text("Phone status", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                                 IconButton(onClick = { statsTick = tick + 1 }) { Icon(Icons.Filled.Refresh, "Refresh", tint = p.sub) }
                             }
-                            Meter("RAM free", "${Formatter.formatShortFileSize(ctx, mi.availMem)} / ${Formatter.formatShortFileSize(ctx, mi.totalMem)}",
-                                mi.availMem / mi.totalMem.toFloat(), Brush.horizontalGradient(listOf(p.cyan, Green)))
-                            Meter("Storage free", "${Formatter.formatShortFileSize(ctx, sf.availableBytes)} / ${Formatter.formatShortFileSize(ctx, sf.totalBytes)}",
-                                sf.availableBytes / sf.totalBytes.toFloat(), Brush.horizontalGradient(listOf(p.blueHi, p.blue)))
-                            Meter("Temperature", String.format("%.1f°C", tempC), tempC / 60f, Brush.horizontalGradient(listOf(p.amber, p.red)))
-                            Meter("Battery", "$lvl%", lvl.coerceAtLeast(0) / 100f, Brush.horizontalGradient(listOf(Green, p.cyan)))
+                            Spacer(Modifier.height(8.dp))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                VBar("RAM free", Formatter.formatShortFileSize(ctx, mi.availMem), mi.availMem / mi.totalMem.toFloat(), Brush.verticalGradient(listOf(p.cyan, p.blue)))
+                                VBar("Disk free", Formatter.formatShortFileSize(ctx, sf.availableBytes), sf.availableBytes / sf.totalBytes.toFloat(), Brush.verticalGradient(listOf(p.cyan, p.blue)))
+                                VBar("Temp", String.format("%.1f°C", tempC), tempC / 60f, Brush.verticalGradient(listOf(p.amber, p.red)))
+                                VBar("Battery", "$lvl%", lvl.coerceAtLeast(0) / 100f, Brush.verticalGradient(listOf(Green, p.cyan)))
+                            }
                         }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -439,23 +448,27 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                     SectionTitle("Quick actions")
                     val quick = actions.filter { it.id != "reset" }.take(4)
                     val qIcons = listOf(Icons.Filled.PlayArrow, Icons.Filled.Refresh, Icons.Filled.Build, Icons.Filled.Settings)
-                    val qColors = listOf(listOf(p.blueHi, p.blue), listOf(p.cyan, Green), listOf(p.amber, p.red), listOf(p.blue, p.cyan))
                     quick.chunked(2).forEachIndexed { row, items ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                             items.forEachIndexed { col, t ->
                                 val k = row * 2 + col
-                                QuickTile(t.title, qIcons[k], Brush.linearGradient(qColors[k]), canRun, Modifier.weight(1f)) { run(t, true) }
+                                QuickTile(t.title, qIcons[k], k == 0, canRun, Modifier.weight(1f)) { run(t, true) }
                             }
                             if (items.size == 1) Spacer(Modifier.weight(1f))
                         }
                     }
                     if (results.size >= 2) {
                         SectionTitle("Smoothness trend")
+                        val latest = results[0].jankPct.toFloat()
+                        val change = latest - results[1].jankPct.toFloat()
                         Panel {
-                            Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                                Sparkline(results.take(8).reversed().map { it.jankPct.toFloat() }, Modifier.fillMaxWidth().height(80.dp), p.blueHi)
-                                Spacer(Modifier.height(6.dp))
-                                Text("Jank % over your last ${minOf(results.size, 8)} tests (lower is better)", color = p.sub, fontSize = 12.sp)
+                            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.width(96.dp)) {
+                                    Text("Last ${minOf(results.size, 8)} tests", color = p.sub, fontSize = 12.sp)
+                                    Text(String.format("%+.1f pt", change), color = if (change <= 0f) Green else p.red, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                                    Text("jank vs previous", color = p.sub, fontSize = 11.sp)
+                                }
+                                Sparkline(results.take(8).reversed().map { it.jankPct.toFloat() }, Modifier.weight(1f).height(70.dp), p.blue)
                             }
                         }
                     }
@@ -719,30 +732,44 @@ private fun DrawScope.neuShadowPath(path: Path, fill: Color, shadow: Color, dx: 
     drawContext.canvas.nativeCanvas.drawPath(path.asAndroidPath(), paint)
 }
 
-/** Raised card: white face, soft tinted drop shadow, hairline border. [brush] paints a gradient face, [glow] tints the shadow. */
+/** Raised surface: light shadow top-left, dark shadow bottom-right. [brush] paints a gradient face, [glow] tints the dark shadow. */
 private fun Modifier.neuRaised(p: Pal, radius: Dp, depth: Dp = 7.dp, brush: Brush? = null, glow: Color? = null): Modifier =
     drawBehind {
         val r = radius.toPx()
         val d = depth.toPx()
-        neuFill(p.hi, glow ?: p.lo, 0f, d * .9f, d * 2.4f, r)
+        neuFill(p.face, glow ?: p.lo, d, d, d * 2.2f, r)
+        neuFill(p.face, p.hi, -d, -d, d * 2.2f, r)
         if (brush != null) drawRoundRect(brush, cornerRadius = CornerRadius(r))
-        else drawRoundRect(p.line, cornerRadius = CornerRadius(r), style = Stroke(1.dp.toPx()))
     }
 
-/** Flat tinted well (switch tracks, stat tiles, pressed buttons). */
+/** Pressed-in surface: dark inner shadow top-left, light inner shadow bottom-right. */
 private fun Modifier.neuInset(p: Pal, radius: Dp, depth: Dp = 4.dp): Modifier =
     drawBehind {
-        drawRoundRect(p.line.copy(alpha = .75f), cornerRadius = CornerRadius(radius.toPx()))
+        val r = radius.toPx()
+        val d = depth.toPx()
+        val rr = RoundRect(0f, 0f, size.width, size.height, CornerRadius(r))
+        val hole = Path().apply { addRoundRect(rr) }
+        drawRoundRect(p.bg, cornerRadius = CornerRadius(r))
+        clipPath(hole) {
+            val m = 60.dp.toPx()
+            val frame = Path().apply {
+                fillType = PathFillType.EvenOdd
+                addRect(Rect(-m, -m, size.width + m, size.height + m))
+                addRoundRect(rr)
+            }
+            neuShadowPath(frame, p.bg, p.lo, d, d, d * 2f)
+            neuShadowPath(frame, p.bg, p.hi, -d, -d, d * 2f)
+        }
     }
 
 private fun DrawScope.aurora(p: Pal) {
-    fun blob(c: Color, x: Float, y: Float, r: Float) {
+    fun blob(c: Color, a: Float, x: Float, y: Float, r: Float) {
         val o = Offset(size.width * x, size.height * y)
-        drawCircle(Brush.radialGradient(listOf(c.copy(alpha = .28f), Color.Transparent), o, r), r, o)
+        drawCircle(Brush.radialGradient(listOf(c.copy(alpha = a), Color.Transparent), o, r), r, o)
     }
-    blob(p.cyan, .95f, .02f, size.width * .8f)
-    blob(Color(0xFF8B5CF6), 0f, .32f, size.width * .75f)
-    blob(Color(0xFF16C79A), .95f, .8f, size.width * .7f)
+    blob(p.cyan, .22f, 1.0f, .02f, size.width * .85f)
+    blob(Color(0xFF8B5CF6), .16f, 0f, .35f, size.width * .8f)
+    blob(p.blue, .18f, 1.0f, .85f, size.width * .8f)
 }
 
 /** Click with a springy press-in squish and no ripple. */
@@ -771,7 +798,7 @@ private fun Header(status: Int, onGear: () -> Unit) {
                 Text(when (status) { 2 -> "Shizuku connected"; 1 -> "Needs permission"; else -> "Shizuku not running" }, color = p.sub, fontSize = 13.sp)
             }
         }
-        Box(Modifier.size(46.dp).neuRaised(p, 23.dp, 5.dp).clip(CircleShape).bounceClick(onGear), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(46.dp).neuRaised(p, 16.dp, 5.dp).clip(RoundedCornerShape(16.dp)).bounceClick(onGear), contentAlignment = Alignment.Center) {
             Icon(Icons.Filled.Settings, "Settings", tint = p.sub, modifier = Modifier.size(22.dp))
         }
     }
@@ -780,7 +807,7 @@ private fun Header(status: Int, onGear: () -> Unit) {
 @Composable
 private fun Panel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     val p = LocalPal.current
-    Column(modifier.fillMaxWidth().neuRaised(p, 28.dp, 8.dp), content = content)
+    Column(modifier.fillMaxWidth().neuRaised(p, 30.dp, 10.dp), content = content)
 }
 
 /** Pill button. Soft = raised and presses in; primary = blue gradient face. */
@@ -817,8 +844,8 @@ private fun NeuChoice(text: String, selected: Boolean, onClick: () -> Unit) {
     val p = LocalPal.current
     Text(
         text, fontSize = 14.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-        color = if (selected) p.blue else p.text,
-        modifier = (if (selected) Modifier.neuInset(p, 22.dp, 3.dp) else Modifier.neuRaised(p, 22.dp, 4.dp))
+        color = if (selected) Color.White else p.text,
+        modifier = (if (selected) Modifier.neuRaised(p, 22.dp, 3.dp, Brush.horizontalGradient(listOf(p.blue, p.cyan)), p.blue.copy(alpha = .4f)) else Modifier.neuRaised(p, 22.dp, 4.dp))
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 9.dp),
     )
@@ -856,7 +883,10 @@ private fun NeuSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit, enab
 @Composable
 private fun Hairline() {
     val p = LocalPal.current
-    Box(Modifier.fillMaxWidth().height(1.dp).background(p.line))
+    Column(Modifier.fillMaxWidth()) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(p.line))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(p.hi))
+    }
 }
 
 @Composable
@@ -940,27 +970,35 @@ private fun Stat(value: String, label: String) {
     }
 }
 
-/** Gauge: gradient arc on a pressed-in track, with a raised disc in the middle. */
+/** Gauge: gradient arc for tweaks on, thin grey inner arc for tweaks off, raised disc in the middle. */
 @Composable
 private fun Ring(frac: Float, big: String, small: String) {
     val p = LocalPal.current
     val shown by animateFloatAsState(frac, spring(dampingRatio = .6f, stiffness = 120f), label = "ring")
-    Box(Modifier.size(190.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(210.dp), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
-            val w = 14.dp.toPx()
+            val w = 16.dp.toPx()
             val sz = Size(size.width - w, size.height - w)
+            val tl = Offset(w / 2, w / 2)
             drawArc(color = p.line, startAngle = 135f, sweepAngle = 270f, useCenter = false,
-                topLeft = Offset(w / 2, w / 2), size = sz, style = Stroke(w, cap = StrokeCap.Round))
+                topLeft = tl, size = sz, style = Stroke(w, cap = StrokeCap.Round))
             if (shown > 0.001f) {
                 val g = Brush.linearGradient(listOf(p.blueHi, p.blue, p.cyan), start = Offset(0f, size.height), end = Offset(size.width, 0f))
-                drawArc(brush = g, startAngle = 135f, sweepAngle = 270f * shown, useCenter = false, alpha = .22f,
-                    topLeft = Offset(w / 2, w / 2), size = sz, style = Stroke(w + 6.dp.toPx(), cap = StrokeCap.Round))
+                drawArc(brush = g, startAngle = 135f, sweepAngle = 270f * shown, useCenter = false, alpha = .2f,
+                    topLeft = tl, size = sz, style = Stroke(w + 8.dp.toPx(), cap = StrokeCap.Round))
                 drawArc(brush = g, startAngle = 135f, sweepAngle = 270f * shown, useCenter = false,
-                    topLeft = Offset(w / 2, w / 2), size = sz, style = Stroke(w, cap = StrokeCap.Round))
+                    topLeft = tl, size = sz, style = Stroke(w, cap = StrokeCap.Round))
             }
+            val rest = (1f - shown).coerceIn(0f, 1f)
+            val inset = w + 12.dp.toPx()
+            if (rest > 0.001f) drawArc(
+                color = p.sub.copy(alpha = .35f), startAngle = 135f, sweepAngle = 270f * rest, useCenter = false,
+                topLeft = Offset(inset, inset), size = Size(size.width - inset * 2, size.height - inset * 2),
+                style = Stroke(7.dp.toPx(), cap = StrokeCap.Round),
+            )
         }
         Column(
-            Modifier.size(116.dp).neuRaised(p, 58.dp, 8.dp),
+            Modifier.size(112.dp).neuRaised(p, 56.dp, 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
         ) {
             Text(big, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, color = p.text)
@@ -974,17 +1012,18 @@ private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
     val p = LocalPal.current
     val tabs = listOf("Home" to Icons.Filled.Home, "Actions" to Icons.Filled.PlayArrow, "Tweaks" to Icons.Filled.Build, "Measure" to Icons.Filled.Search, "Log" to Icons.Filled.Info)
     val idx = animateFloatAsState(selected.toFloat(), spring(dampingRatio = .55f, stiffness = 260f), label = "navIdx")
+    val bar = Brush.horizontalGradient(listOf(p.blue, p.cyan))
     Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 22.dp, vertical = 14.dp)) {
-        BoxWithConstraints(Modifier.fillMaxWidth().neuRaised(p, 32.dp, 8.dp).padding(6.dp)) {
+        BoxWithConstraints(Modifier.fillMaxWidth().neuRaised(p, 32.dp, 8.dp, bar, p.blue.copy(alpha = .45f)).padding(6.dp)) {
             val itemW = constraints.maxWidth / tabs.size.toFloat()
             Box(
                 Modifier.offset { IntOffset((itemW * idx.value).roundToInt(), 0) }
                     .width(maxWidth / tabs.size).height(60.dp)
-                    .neuRaised(p, 26.dp, 3.dp, Brush.linearGradient(listOf(p.blueHi, p.blue)), p.blue.copy(alpha = .45f)),
+                    .neuRaised(p, 26.dp, 3.dp),
             )
             Row(Modifier.fillMaxWidth().height(60.dp)) {
                 tabs.forEachIndexed { i, (label, icon) ->
-                    val c = if (i == selected) Color.White else p.sub
+                    val c = if (i == selected) p.blue else Color.White
                     Column(
                         Modifier.weight(1f).fillMaxHeight().bounceClick { onSelect(i) },
                         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
@@ -1005,35 +1044,48 @@ private fun SectionTitle(text: String) {
 }
 
 @Composable
-private fun Meter(title: String, value: String, frac: Float, brush: Brush) {
+private fun LegendDot(color: Color, text: String) {
     val p = LocalPal.current
-    val f by animateFloatAsState(frac.coerceIn(0f, 1f), tween(700), label = "meter")
-    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-        Row {
-            Text(title, color = p.sub, fontSize = 13.sp, modifier = Modifier.weight(1f))
-            Text(value, color = p.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-        }
-        Spacer(Modifier.height(6.dp))
-        Box(Modifier.fillMaxWidth().height(8.dp).clip(CircleShape).background(p.line)) {
-            Box(Modifier.fillMaxWidth(f).fillMaxHeight().clip(CircleShape).background(brush))
-        }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(10.dp).clip(CircleShape).background(color))
+        Spacer(Modifier.width(6.dp))
+        Text(text, color = p.sub, fontSize = 12.sp)
     }
 }
 
+/** Vertical capsule gauge: pressed-in track, gradient fill from the bottom. */
 @Composable
-private fun QuickTile(title: String, icon: ImageVector, brush: Brush, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
+private fun VBar(label: String, value: String, frac: Float, brush: Brush) {
     val p = LocalPal.current
+    val f by animateFloatAsState(frac.coerceIn(0f, 1f), tween(700), label = "vbar")
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.width(34.dp).height(120.dp).neuInset(p, 17.dp, 3.dp).padding(4.dp), contentAlignment = Alignment.BottomCenter) {
+            Box(Modifier.fillMaxWidth().fillMaxHeight(maxOf(f, .06f)).clip(CircleShape).background(brush))
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(value, color = p.text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = p.sub, fontSize = 11.sp)
+    }
+}
+
+/** Square tile like the dashboard reference: the featured one is a blue gradient, the rest are raised white. */
+@Composable
+private fun QuickTile(title: String, icon: ImageVector, featured: Boolean, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val p = LocalPal.current
+    val look = if (featured)
+        Modifier.neuRaised(p, 26.dp, 7.dp, Brush.linearGradient(listOf(p.blueHi, p.blue)), p.blue.copy(alpha = .45f))
+    else Modifier.neuRaised(p, 26.dp, 7.dp)
     Column(
         modifier.graphicsLayer { alpha = if (enabled) 1f else .45f }
-            .neuRaised(p, 24.dp, 6.dp)
+            .then(look)
             .bounceClick { if (enabled) onClick() }
-            .padding(16.dp),
+            .heightIn(min = 112.dp).padding(14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
-        Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(brush), contentAlignment = Alignment.Center) {
-            Icon(icon, null, tint = Color.White, modifier = Modifier.size(22.dp))
-        }
+        Icon(icon, null, tint = if (featured) Color.White else p.blue, modifier = Modifier.size(30.dp))
         Spacer(Modifier.height(10.dp))
-        Text(title, color = p.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
+        Text(title, color = if (featured) Color.White else p.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            maxLines = 2, textAlign = TextAlign.Center)
     }
 }
 
@@ -1045,11 +1097,13 @@ private fun Sparkline(values: List<Float>, modifier: Modifier, color: Color) {
         val mn = values.minOrNull() ?: 0f
         val range = if (mx - mn > 0f) mx - mn else 1f
         val dx = size.width / (values.size - 1)
-        val ys = values.map { size.height * .88f - (it - mn) / range * size.height * .76f }
+        val ys = values.map { size.height * .85f - (it - mn) / range * size.height * .7f }
         val line = Path().apply { ys.forEachIndexed { i, y -> if (i == 0) moveTo(0f, y) else lineTo(i * dx, y) } }
         val fill = Path().apply { addPath(line); lineTo(size.width, size.height); lineTo(0f, size.height); close() }
-        drawPath(fill, Brush.verticalGradient(listOf(color.copy(alpha = .28f), Color.Transparent)))
+        drawPath(fill, Brush.verticalGradient(listOf(color.copy(alpha = .22f), Color.Transparent)))
         drawPath(line, color, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
-        ys.forEachIndexed { i, y -> drawCircle(color, 4.dp.toPx(), Offset(i * dx, y)) }
+        val end = Offset((values.size - 1) * dx, ys.last())
+        drawCircle(Color.White, 8.dp.toPx(), end)
+        drawCircle(color, 5.dp.toPx(), end)
     }
 }
