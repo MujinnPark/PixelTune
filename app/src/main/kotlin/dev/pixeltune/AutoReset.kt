@@ -29,15 +29,19 @@ object AutoReset {
         if (!running.compareAndSet(false, true)) return
         Thread {
             try {
-                val tweaks = Tweaks.toggles(120) + Tweaks.packs(ctx)
-                val cmds = tweaks.flatMap { it.revert }.toMutableList()
-                cmds += "wm size reset"
-                cmds += "wm density reset"
+                // Only undo what PixelTune itself applied. Deleting keys that were never touched would wipe OEM defaults.
+                val tweaks = (Tweaks.toggles(120) + Tweaks.packs(ctx)).filter { prefs.getBoolean(it.id, false) || Snapshot.has(prefs, it) }
+                val cmds = tweaks.flatMap { Snapshot.revertCmds(prefs, it) }.toMutableList()
+                if (prefs.getInt("res_scale", 100) < 100 || prefs.getBoolean("res_pending", false)) {
+                    cmds += "wm size reset"
+                    cmds += "wm density reset"
+                }
                 (prefs.getString("alive_sel", "") ?: "").split(",").filter { it.isNotBlank() }.forEach {
                     cmds += "cmd deviceidle whitelist -$it"
                     cmds += "cmd appops set $it RUN_ANY_IN_BACKGROUND default"
                 }
                 val r = Shell.runAll(cmds)
+                tweaks.forEach { Snapshot.clear(prefs, it) }
                 val e = prefs.edit()
                 tweaks.forEach { e.putBoolean(it.id, false) }
                 e.putInt("last_boot", boot).putInt("res_scale", 100).putBoolean("res_pending", false).apply()

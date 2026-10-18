@@ -11,6 +11,7 @@ import android.text.format.Formatter
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import android.hardware.display.DisplayManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -199,7 +200,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     }
     val canRun = status == 2 && !busy
     val activeOn = on.values.count { it }
-    val total = on.size
+    val total = (toggles + packs).count { DeviceScan.staticReason(it, Vendor.detect(), Build.VERSION.SDK_INT) == null }
     val riskyOn = packs.count { it.risky && on[it.id] == true }
     val animTweak = toggles.firstOrNull { it.id == "anim" }
     val aotAction = actions.firstOrNull { it.id == "aot" }
@@ -232,16 +233,36 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     )
     val ver = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "" }
 
+    val vendorNow = remember { Vendor.detect() }
+    var scan by remember { mutableStateOf<DeviceInfo?>(null) }
+    /** Why this tweak can't run here, or null if it can. */
+    fun why(t: Tweak): String? {
+        DeviceScan.staticReason(t, vendorNow, Build.VERSION.SDK_INT)?.let { return it }
+        if (status != 2) return null
+        val d = scan ?: return "Scanning device…"
+        return DeviceScan.reason(t, d)
+    }
     suspend fun exec(t: Tweak, enable: Boolean) {
-            val all = if (enable) t.apply else t.revert
+            val block = if (enable && !t.action) why(t) else null
+            if (block != null) {
+                history.add(0, Entry(t.title, System.currentTimeMillis(), 1, "Skipped", "Not compatible with this device: $block"))
+                return
+            }
+            // Nothing to undo if PixelTune never applied it; deleting untouched keys could wipe OEM defaults.
+            if (!enable && !t.action && !prefs.getBoolean(t.id, false) && !Snapshot.has(prefs, t)) return
+            val all = if (enable) t.apply else Snapshot.revertCmds(prefs, t)
             val skipped = if (enable && keepNotif) all.filter { Tweaks.touchesNotifications(it) } else emptyList()
             val cmds = all - skipped.toSet()
+            if (enable && !t.action) withContext(Dispatchers.IO) { runCatching { Snapshot.capture(prefs, t) } }
             val r = withContext(Dispatchers.IO) {
                 runCatching { Shell.runAll(cmds) }.getOrElse { ShellResult(0, 0, listOf("Failed: ${it.message}"), "") }
             }
+            val v = if (enable && !t.action) withContext(Dispatchers.IO) { runCatching { Verify.settings(cmds) }.getOrNull() } else null
             if (!t.action) {
-                val applied = enable && r.failed < cmds.size
+                val stuck = v == null || v.total == 0 || v.stuck > 0 // nothing readable to check = trust the shell result
+                val applied = enable && r.failed < cmds.size && stuck
                 on[t.id] = applied; prefs.edit().putBoolean(t.id, applied).apply()
+                if (!applied) Snapshot.clear(prefs, t)
             }
             val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
             val saved = withContext(Dispatchers.IO) {
@@ -250,13 +271,14 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                     append("Sent ${cmds.size} command(s), skipped ${skipped.size} (notification guard)\n\n")
                     if (skipped.isNotEmpty()) { append("Skipped:\n"); skipped.forEach { append(it).append('\n') }; append('\n') }
                     append("Commands:\n"); cmds.forEach { append(it).append('\n') }
+                    if (v != null && v.total > 0) { append("\nVerification: ${v.stuck}/${v.total} settings stuck\n"); v.bad.forEach { append("NOT SET: ").append(it).append('\n') } }
                     append("\nFull output:\n").append(r.raw)
                 })
             }
             val fails = if (enable) r.failed else 0 // reverting flags that were never set is expected to be rejected
             val level = when {
-                cmds.isNotEmpty() && fails >= cmds.size -> 2
-                fails > 0 || r.other.any { Regex("(?i)exception|error|fail|denied|not found").containsMatchIn(it) } -> 1
+                (cmds.isNotEmpty() && fails >= cmds.size) || (v != null && v.total > 0 && v.stuck == 0) -> 2
+                fails > 0 || (v != null && v.stuck < v.total) || r.other.any { Regex("(?i)exception|error|fail|denied|not found").containsMatchIn(it) } -> 1
                 else -> 0
             }
             val label = when {
@@ -269,6 +291,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
             val summary = buildString {
                 append("${cmds.size} command(s) sent")
                 if (skipped.isNotEmpty()) append(" · ${skipped.size} skipped for notifications")
+                if (v != null && v.total > 0) append(" · ${v.stuck}/${v.total} settings verified")
                 if (r.ok > 0) append(" · ${r.ok} packages OK")
                 if (r.failed > 0) append(
                     if (enable) " · ${r.failed} rejected by Android" + (if (r.ok == 0) " (${(cmds.size - r.failed).coerceAtLeast(0)} accepted)" else "")
@@ -337,6 +360,11 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     // After a reboot, turn tweaks off once Shizuku is up; reload the screen state when that happens.
     LaunchedEffect(status) { if (status == 2) AutoReset.runIfNeeded(ctx.applicationContext) }
     val resetVer = AutoReset.version.intValue
+    // Look at the device before offering anything: vendor, API, setting write access, and each tweak's probes.
+    LaunchedEffect(status, resetVer) {
+        scan = null
+        if (status == 2) scan = withContext(Dispatchers.IO) { DeviceScan.scan(toggles + packs, vendorNow) }
+    }
     LaunchedEffect(resetVer) {
         if (resetVer > 0) {
             (toggles + packs).forEach { on[it.id] = prefs.getBoolean(it.id, false) }
@@ -509,12 +537,18 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                 }
                 }
                 2 -> {
-                    val std = packs.filter { !it.risky }
-                    val risky = packs.filter { it.risky }
+                    val vend = packs.filter { it.vendors.isNotEmpty() && vendorNow in it.vendors }
+                    val std = packs.filter { !it.risky && it.vendors.isEmpty() }
+                    val risky = packs.filter { it.risky && it.vendors.isEmpty() }
                     val onToggle = { t: Tweak, v: Boolean -> if (v && t.risky) confirm = t else run(t, v) }
+                    scan?.let { d ->
+                        Text("Scanned: ${d.model} · ${d.rom} · Android API ${d.sdk}", color = p.sub, fontSize = 12.sp)
+                        if (!d.ok || !d.writable) IssueCard("Setup needed", p.red, p.redBg, "Now",
+                            if (d.ok) "Android is blocking setting writes" else "Device scan failed", d.hint)
+                    }
                     Accordion("System tweaks", Icons.Filled.Refresh, isOpen("d", true), { open["d"] = !isOpen("d", true) },
                         badges = { CountChip(toggles.count { on[it.id] == true }, p.amber, Color.Black) }) {
-                        toggles.forEachIndexed { i, t -> if (i > 0) Hairline(); ToggleRow(t, on[t.id] == true, canRun) { onToggle(t, it) } }
+                        toggles.forEachIndexed { i, t -> if (i > 0) Hairline(); ToggleRow(t, on[t.id] == true, canRun, why(t)) { onToggle(t, it) } }
                     }
                     Accordion("Display resolution", Icons.Filled.Settings, isOpen("res", false), { open["res"] = !isOpen("res", false) },
                         badges = { if (resScale < 100) Chip("$resScale%", p.amber, Color.Black) }) {
@@ -533,11 +567,15 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                     }
                     Accordion("Cleanup & privacy packs", Icons.Filled.Build, isOpen("c", false), { open["c"] = !isOpen("c", false) },
                         badges = { CountChip(std.count { on[it.id] == true }, p.amber, Color.Black) }) {
-                        std.forEachIndexed { i, t -> if (i > 0) Hairline(); ToggleRow(t, on[t.id] == true, canRun) { onToggle(t, it) } }
+                        std.forEachIndexed { i, t -> if (i > 0) Hairline(); ToggleRow(t, on[t.id] == true, canRun, why(t)) { onToggle(t, it) } }
+                    }
+                    if (vend.isNotEmpty()) Accordion("Device-specific (experimental)", Icons.Filled.Build, isOpen("v", true), { open["v"] = !isOpen("v", true) },
+                        badges = { CountChip(vend.count { on[it.id] == true }, p.amber, Color.Black) }) {
+                        vend.forEachIndexed { i, t -> if (i > 0) Hairline(); ToggleRow(t, on[t.id] == true, canRun, why(t)) { onToggle(t, it) } }
                     }
                     Accordion("Risky packs", Icons.Filled.Warning, isOpen("r", false), { open["r"] = !isOpen("r", false) },
                         badges = { CountChip(riskyOn, p.red, Color.White) }) {
-                        risky.forEachIndexed { i, t -> if (i > 0) Hairline(); ToggleRow(t, on[t.id] == true, canRun) { onToggle(t, it) } }
+                        risky.forEachIndexed { i, t -> if (i > 0) Hairline(); ToggleRow(t, on[t.id] == true, canRun, why(t)) { onToggle(t, it) } }
                     }
                 }
                 3 -> {
@@ -915,7 +953,7 @@ private fun Accordion(
 }
 
 @Composable
-private fun ToggleRow(t: Tweak, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+private fun ToggleRow(t: Tweak, checked: Boolean, enabled: Boolean, blocked: String?, onChange: (Boolean) -> Unit) {
     val p = LocalPal.current
     Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).padding(end = 12.dp)) {
@@ -925,8 +963,9 @@ private fun ToggleRow(t: Tweak, checked: Boolean, enabled: Boolean, onChange: (B
             }
             Text(t.desc, color = p.sub, fontSize = 13.sp)
             if (t.note.isNotBlank()) Text("Note: ${t.note}", color = p.sub, fontSize = 12.sp)
+            if (blocked != null) Text("Skipped: $blocked", color = p.red, fontSize = 12.sp)
         }
-        NeuSwitch(checked = checked, onCheckedChange = onChange, enabled = enabled)
+        NeuSwitch(checked = checked, onCheckedChange = onChange, enabled = enabled && (blocked == null || checked))
     }
 }
 

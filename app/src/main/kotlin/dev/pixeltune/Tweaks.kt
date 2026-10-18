@@ -7,6 +7,11 @@ data class Tweak(
     val id: String, val title: String, val desc: String, val note: String = "",
     val apply: List<String>, val revert: List<String> = emptyList(),
     val risky: Boolean = false, val action: Boolean = false,
+    /** Empty = any device. Otherwise one or more of: google, samsung, xiaomi, oplus. */
+    val vendors: List<String> = emptyList(),
+    val minSdk: Int = 0, val maxSdk: Int = 999,
+    /** Device probes that must all pass: pkg:<package>, prop:<name>, setting:<ns>:<key>. */
+    val needs: List<String> = emptyList(),
 )
 
 object Tweaks {
@@ -59,11 +64,13 @@ object Tweaks {
 
     fun packs(c: Context): List<Tweak> {
         val a = JSONArray(c.assets.open("packs.json").bufferedReader().readText())
-        fun JSONArray.strs() = List(length()) { getString(it) }
+        fun JSONArray?.strs(): List<String> = if (this == null) emptyList() else List(length()) { getString(it) }
         return List(a.length()) {
             val o = a.getJSONObject(it)
             Tweak(o.getString("id"), o.getString("title"), o.getString("desc"), o.optString("note"),
-                o.getJSONArray("apply").strs(), o.getJSONArray("revert").strs(), o.getBoolean("risky"))
+                o.getJSONArray("apply").strs(), o.getJSONArray("revert").strs(), o.getBoolean("risky"),
+                vendors = o.optJSONArray("vendors").strs(), minSdk = o.optInt("minSdk", 0), maxSdk = o.optInt("maxSdk", 999),
+                needs = o.optJSONArray("needs").strs())
         }
     }
 }
