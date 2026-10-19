@@ -1,7 +1,6 @@
 package dev.pixeltune
 
 import android.content.Context
-import android.provider.Settings
 import androidx.compose.runtime.mutableIntStateOf
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -20,11 +19,10 @@ object AutoReset {
     fun runIfNeeded(ctx: Context) {
         val prefs = ctx.getSharedPreferences("tweaks", Context.MODE_PRIVATE)
         if (!prefs.getBoolean("reset_on_boot", true)) return
-        val boot = Settings.Global.getInt(ctx.contentResolver, Settings.Global.BOOT_COUNT, -1)
-        if (boot < 0) return
-        val last = prefs.getInt("last_boot", -1)
-        if (last < 0) { prefs.edit().putInt("last_boot", boot).apply(); return } // first run: only remember this boot
-        if (boot == last) return
+        val (boot, source) = BootId.read(ctx)
+        val last = prefs.getString("last_boot_id", null)
+        if (last == null) { prefs.edit().putString("last_boot_id", boot).apply(); return } // first run: only remember this boot
+        if (BootId.same(boot, last)) return
         if (Shell.status() != 2) return
         if (!running.compareAndSet(false, true)) return
         Thread {
@@ -44,13 +42,13 @@ object AutoReset {
                 tweaks.forEach { Snapshot.clear(prefs, it) }
                 val e = prefs.edit()
                 tweaks.forEach { e.putBoolean(it.id, false) }
-                e.putInt("last_boot", boot).putInt("res_scale", 100).putBoolean("res_pending", false).apply()
+                e.putString("last_boot_id", boot).putInt("res_scale", 100).putBoolean("res_pending", false).apply()
                 val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
                 LogStore.save(ctx, "pixeltune_autoreset_$stamp.txt",
-                    "Reset after reboot (boot #$boot)\n${cmds.size} command(s) sent\n\nOutput:\n${r.raw}")
+                    "Reset after reboot (detected by $source)\n${cmds.size} command(s) sent\n\nCommands:\n${cmds.joinToString("\n")}\n\nOutput:\n${r.raw}")
                 version.intValue = version.intValue + 1
             } catch (_: Throwable) {
-                // Shizuku went away mid-way: last_boot is unchanged, so this retries next time it starts.
+                // Shizuku went away mid-way: last_boot_id is unchanged, so this retries next time it starts.
             } finally {
                 running.set(false)
             }
