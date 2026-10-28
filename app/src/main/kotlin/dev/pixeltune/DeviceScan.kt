@@ -35,6 +35,7 @@ object DeviceScan {
         "oplus" -> "Open Developer options. On ColorOS 15 and older, turn off “Permission monitoring”. " +
             "On ColorOS 16 and newer, turn on “Disable system optimization” (it may only appear with the system language set to English). " +
             "Labels on realme UI are unverified. Then restart Shizuku."
+        "vivo" -> "Restart Shizuku (Wireless debugging) and grant access again. If writes stay blocked, look in Developer options for a security or permission-monitoring switch. Labels on Funtouch OS / OriginOS are unverified."
         "samsung" -> "Restart Shizuku (Wireless debugging) and check that the grant is still active."
         else -> "Restart Shizuku and grant access again."
     }
