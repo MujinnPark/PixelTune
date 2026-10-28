@@ -7,7 +7,7 @@ data class Tweak(
     val id: String, val title: String, val desc: String, val note: String = "",
     val apply: List<String>, val revert: List<String> = emptyList(),
     val risky: Boolean = false, val action: Boolean = false,
-    /** Empty = any device. Otherwise one or more of: google, samsung, xiaomi, oplus. */
+    /** Empty = any device. Otherwise one or more of: google, samsung, xiaomi, oplus, vivo. */
     val vendors: List<String> = emptyList(),
     val minSdk: Int = 0, val maxSdk: Int = 999,
     /** Device probes that must all pass: pkg:<package>, prop:<name>, setting:<ns>:<key>. */
@@ -53,6 +53,11 @@ object Tweaks {
             "Turn off Lock $hz Hz first. If both are on, the last one switched on wins.",
             listOf("settings put system peak_refresh_rate 60.0", "settings put system min_refresh_rate 60.0"),
             listOf("settings delete system peak_refresh_rate", "settings delete system min_refresh_rate")),
+        Tweak("hzmi", "Xiaomi: set $hz Hz in system display setting", "Writes the same key HyperOS/MIUI's own refresh-rate picker uses, so the lock follows the ROM's setting.",
+            "Experimental. Only shown when the key exists. Key and values seen in community tools; effect not measured here. Turn off Lock $hz Hz first if the picture flickers between modes.",
+            listOf("settings put secure miui_refresh_rate $hz"),
+            listOf("settings delete secure miui_refresh_rate"),
+            vendors = listOf("xiaomi"), needs = listOf("setting:secure:miui_refresh_rate")),
         Tweak("blur", "Disable window blur", "Turns off the blur behind the notification shade and system panels.",
             "Less GPU work, flatter look. Not measured. Pull down the shade to see if it worked.",
             listOf("settings put global disable_window_blurs 1"), listOf("settings delete global disable_window_blurs")),

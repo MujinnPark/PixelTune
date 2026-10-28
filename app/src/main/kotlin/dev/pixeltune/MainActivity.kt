@@ -258,6 +258,9 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                 runCatching { Shell.runAll(cmds) }.getOrElse { ShellResult(0, 0, listOf("Failed: ${it.message}"), "") }
             }
             val v = if (enable && !t.action) withContext(Dispatchers.IO) { runCatching { Verify.settings(cmds) }.getOrNull() } else null
+            val checkHz = enable && t.id in DisplayCheck.IDS
+            val wantHz = if (t.id == "hz60") 60 else hz
+            val shownHz = if (checkHz) withContext(Dispatchers.IO) { runCatching { DisplayCheck.activeHz() }.getOrNull() } else null
             if (!t.action) {
                 val stuck = v == null || v.total == 0 || v.stuck > 0 // nothing readable to check = trust the shell result
                 val applied = enable && r.failed < cmds.size && stuck
@@ -272,6 +275,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                     if (skipped.isNotEmpty()) { append("Skipped:\n"); skipped.forEach { append(it).append('\n') }; append('\n') }
                     append("Commands:\n"); cmds.forEach { append(it).append('\n') }
                     if (v != null && v.total > 0) { append("\nVerification: ${v.stuck}/${v.total} settings stuck\n"); v.bad.forEach { append("NOT SET: ").append(it).append('\n') } }
+                    if (checkHz) append("\nDisplay reports: ${shownHz?.let { "$it Hz" } ?: "unreadable"} (target $wantHz Hz)\n")
                     append("\nFull output:\n").append(r.raw)
                 })
             }
@@ -292,6 +296,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                 append("${cmds.size} command(s) sent")
                 if (skipped.isNotEmpty()) append(" · ${skipped.size} skipped for notifications")
                 if (v != null && v.total > 0) append(" · ${v.stuck}/${v.total} settings verified")
+                if (checkHz) append(" · display reports ${shownHz?.let { "$it Hz" } ?: "unreadable"} (target $wantHz Hz)")
                 if (r.ok > 0) append(" · ${r.ok} packages OK")
                 if (r.failed > 0) append(
                     if (enable) " · ${r.failed} rejected by Android" + (if (r.ok == 0) " (${(cmds.size - r.failed).coerceAtLeast(0)} accepted)" else "")
