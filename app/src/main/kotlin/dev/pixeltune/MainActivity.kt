@@ -365,6 +365,17 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
             val r = withContext(Dispatchers.IO) { runCatching { GameProfile.measureFps(gamePkg) }.getOrNull() }
             val fps = r?.fps
             fpsMsg = if (fps != null) "Last reading: $fps FPS" else "No reading. The game has to be on screen and drawing."
+            // Save every reading to a log file with the tweaks that were on, so A/B runs can be compared later.
+            val fpsStamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+            val tweaksOn = on.filter { it.value }.keys.sorted().joinToString(", ").ifBlank { "none" }
+            withContext(Dispatchers.IO) {
+                LogStore.save(ctx, "pixeltune_fps_$fpsStamp.txt", buildString {
+                    append("PixelTune log: Game FPS $gameLabel ($gamePkg) $fpsStamp\n")
+                    append("FPS: ${fps ?: "no reading"}\n")
+                    append("Tweaks on: $tweaksOn\n\n")
+                    append("Raw:\n").append(r?.excerpt ?: "The sampling command failed.").append('\n')
+                })
+            }
             history.add(0, Entry("Game FPS: $gameLabel", System.currentTimeMillis(), if (fps != null) 0 else 1,
                 if (fps != null) "$fps FPS" else "No reading", r?.excerpt ?: "The sampling command failed."))
             busy = false; fpsBusy = false
