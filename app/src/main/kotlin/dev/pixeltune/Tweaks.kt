@@ -12,6 +12,8 @@ data class Tweak(
     val minSdk: Int = 0, val maxSdk: Int = 999,
     /** Device probes that must all pass: pkg:<package>, prop:<name>, setting:<ns>:<key>. */
     val needs: List<String> = emptyList(),
+    /** True when the change survives a reboot, so the reset-on-boot pass must leave it alone. */
+    val persistent: Boolean = false,
 )
 
 object Tweaks {
@@ -75,7 +77,7 @@ object Tweaks {
             Tweak(o.getString("id"), o.getString("title"), o.getString("desc"), o.optString("note"),
                 o.getJSONArray("apply").strs(), o.getJSONArray("revert").strs(), o.getBoolean("risky"),
                 vendors = o.optJSONArray("vendors").strs(), minSdk = o.optInt("minSdk", 0), maxSdk = o.optInt("maxSdk", 999),
-                needs = o.optJSONArray("needs").strs())
+                needs = o.optJSONArray("needs").strs(), persistent = o.optBoolean("persistent", false))
         }
     }
 }

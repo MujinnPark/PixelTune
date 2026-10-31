@@ -28,7 +28,7 @@ object AutoReset {
         Thread {
             try {
                 // Only undo what PixelTune itself applied. Deleting keys that were never touched would wipe OEM defaults.
-                val tweaks = (Tweaks.toggles(120) + Tweaks.packs(ctx)).filter { prefs.getBoolean(it.id, false) || Snapshot.has(prefs, it) }
+                val tweaks = (Tweaks.toggles(120) + Tweaks.packs(ctx)).filter { !it.persistent && (prefs.getBoolean(it.id, false) || Snapshot.has(prefs, it)) }
                 val cmds = tweaks.flatMap { Snapshot.revertCmds(prefs, it) }.toMutableList()
                 if (prefs.getInt("res_scale", 100) < 100 || prefs.getBoolean("res_pending", false)) {
                     cmds += "wm size reset"

@@ -14,6 +14,10 @@ Pack contents live in `app/src/main/assets/packs.json`. Fields: `vendors`, `minS
 - **System properties:** only `debug.hwui.renderer` is offered, because it is the one HWUI property verified as a real switch.
 - **`device_config` flags** (the two system-flag packs) are NOT verified against source. They are accepted by Android, but nothing proves the flags change behaviour, especially off Pixel.
 - **vivo/iQOO:** detected (vendor `vivo`) and given a setup hint, but no vivo-specific tweaks ship yet. Vendor keys need to be read from a real device first.
+- **Game profile:** one game at a time. Applies Android's Game Mode (`cmd game mode performance`, `cmd game set --mode 2 --downscale X --fps Y`) and reverts with `cmd game reset`. Render scale is the part that cuts GPU load; some games opt out, and the FPS cap needs a screen that supports it.
+- **Measure FPS:** reads the game's own surface from `dumpsys SurfaceFlinger --timestats`, not `gfxinfo` (which does not see game frames). The output format was not checked against AOSP source, so the raw lines go to the log; "No reading" means the format or the game layer did not match.
+- **Fixed performance mode (risky) and Samsung GOS removal (risky):** both are off by default, have a revert, and are marked unmeasured. GOS removal survives reboots, so the reset-on-boot pass skips it; switch it off in the app to restore GOS.
+- **Not ported from other optimizers:** thermal override (reports a hotter status, it does not stop throttling), auto-clicker and crosshair overlay (anti-cheat risk), kill-all and cache wipes as "boosts".
 - **Refresh-rate check:** after a refresh-rate tweak is applied, PixelTune logs what `dumpsys display` reports (`renderFrameRate`). This is informational and never changes the Applied status; it may read "unreadable" on ROMs that do not print it.
 - **Xiaomi refresh key:** `miui_refresh_rate` (secure) is not in AOSP. It is only offered on Xiaomi devices where the key already exists, and the previous value is restored on revert.
 - Nothing here has a proven speed gain. Cleanup and privacy packs say so.

@@ -43,6 +43,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
@@ -193,6 +194,17 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     var resConfirm by remember { mutableStateOf(0) }
     var keepNotif by remember { mutableStateOf(prefs.getBoolean("keep_notif", true)) }
     var resetOnBoot by remember { mutableStateOf(prefs.getBoolean("reset_on_boot", true)) }
+    var gamePkg by remember { mutableStateOf(prefs.getString("game_pkg", "") ?: "") }
+    var gameLabel by remember { mutableStateOf(prefs.getString("game_label", "") ?: "") }
+    var gameScale by remember { mutableStateOf(prefs.getString("game_scale", "0.8") ?: "0.8") }
+    var gameFps by remember { mutableIntStateOf(prefs.getInt("game_fps", 0)) }
+    var gameOn by remember { mutableStateOf(prefs.getBoolean("game_on", false)) }
+    var showGamePicker by remember { mutableStateOf(false) }
+    var gameQuery by remember { mutableStateOf("") }
+    var gamesOnly by remember { mutableStateOf(true) }
+    var fpsBusy by remember { mutableStateOf(false) }
+    var fpsMsg by remember { mutableStateOf("") }
+    val gamePkgs by produceState(emptySet<String>()) { value = withContext(Dispatchers.IO) { GameProfile.gamePackages(ctx) } }
     val open = remember { mutableStateMapOf<String, Boolean>() }
     val history = remember { mutableStateListOf<Entry>() }
     val on = remember {
@@ -314,6 +326,39 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     fun runMany(list: List<Pair<Tweak, Boolean>>) {
         scope.launch { busy = true; list.forEach { (t, e) -> exec(t, e) }; busy = false }
     }
+    fun saveGame() {
+        prefs.edit().putString("game_pkg", gamePkg).putString("game_label", gameLabel)
+            .putString("game_scale", gameScale).putInt("game_fps", gameFps).apply()
+    }
+    fun applyGame() {
+        saveGame()
+        scope.launch {
+            busy = true
+            exec(GameProfile.tweak(gamePkg, gameLabel, gameScale, gameFps), true)
+            gameOn = true; prefs.edit().putBoolean("game_on", true).apply()
+            busy = false
+        }
+    }
+    fun resetGame() {
+        scope.launch {
+            busy = true
+            exec(GameProfile.tweak(gamePkg, gameLabel, gameScale, gameFps), false)
+            gameOn = false; prefs.edit().putBoolean("game_on", false).apply()
+            busy = false
+        }
+    }
+    fun measureGameFps() {
+        scope.launch {
+            busy = true; fpsBusy = true
+            fpsMsg = "Switch to $gameLabel now. Sampling starts in 8 s and lasts 4 s."
+            val r = withContext(Dispatchers.IO) { runCatching { GameProfile.measureFps(gamePkg) }.getOrNull() }
+            val fps = r?.fps
+            fpsMsg = if (fps != null) "Last reading: $fps FPS" else "No reading. The game has to be on screen and drawing."
+            history.add(0, Entry("Game FPS: $gameLabel", System.currentTimeMillis(), if (fps != null) 0 else 1,
+                if (fps != null) "$fps FPS" else "No reading", r?.excerpt ?: "The sampling command failed."))
+            busy = false; fpsBusy = false
+        }
+    }
     /** Sets the display to pct% of native size and density (100 = reset). Returns an error text, or null on success. */
     suspend fun setScale(pct: Int): String? = withContext(Dispatchers.IO) {
         runCatching {
@@ -383,6 +428,10 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
             busy = true
             (toggles + packs).forEach { exec(it, false) }
             if (alive.isNotEmpty()) exec(aliveTweak(), false)
+            if (prefs.getBoolean("game_on", false) && GameProfile.valid(gamePkg)) {
+                exec(GameProfile.tweak(gamePkg, gameLabel, gameScale, gameFps), false)
+                gameOn = false; prefs.edit().putBoolean("game_on", false).apply()
+            }
             setScale(100)
             resScale = 100
             prefs.edit().putInt("res_scale", 100).putBoolean("res_pending", false).apply()
@@ -570,6 +619,31 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                             }
                         }
                     }
+                    Accordion("Game profile", Icons.Filled.PlayArrow, isOpen("g", false), { open["g"] = !isOpen("g", false) },
+                        badges = { if (gameOn) Chip("on", p.amber, Color.Black) }) {
+                        Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Uses Android's own Game Mode for one game: performance mode, a lower render resolution and an FPS cap. " +
+                                "Lower resolution is what actually raises FPS in GPU-bound games. Some games opt out of downscaling, and the cap only works if the screen supports it.",
+                                color = p.sub, fontSize = 13.sp)
+                            Text(if (gamePkg.isBlank()) "No game chosen yet." else gameLabel, color = p.text, fontSize = 14.sp)
+                            NeuButton(onClick = { showGamePicker = true }, enabled = canRun && !gameOn, modifier = Modifier.fillMaxWidth()) { Text("Choose game") }
+                            if (gameOn) Text("Reset this game before choosing another.", color = p.sub, fontSize = 12.sp)
+                            Text("Render scale", color = p.text, fontSize = 14.sp)
+                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                GameProfile.SCALES.forEach { s -> NeuChoice(GameProfile.scaleLabel(s), gameScale == s) { gameScale = s } }
+                            }
+                            Text("FPS cap", color = p.text, fontSize = 14.sp)
+                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                GameProfile.FPS.forEach { f -> NeuChoice(if (f == 0) "Off" else "$f", gameFps == f) { gameFps = f } }
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                                NeuButton(onClick = { applyGame() }, enabled = canRun && GameProfile.valid(gamePkg), modifier = Modifier.weight(1f), primary = true) { Text("Apply") }
+                                NeuButton(onClick = { resetGame() }, enabled = canRun && GameProfile.valid(gamePkg) && gameOn, modifier = Modifier.weight(1f)) { Text("Reset game") }
+                            }
+                            NeuButton(onClick = { measureGameFps() }, enabled = canRun && GameProfile.valid(gamePkg), modifier = Modifier.fillMaxWidth()) { Text(if (fpsBusy) "Measuring…" else "Measure FPS") }
+                            if (fpsMsg.isNotBlank()) Text(fpsMsg, color = p.sub, fontSize = 13.sp)
+                        }
+                    }
                     Accordion("Cleanup & privacy packs", Icons.Filled.Build, isOpen("c", false), { open["c"] = !isOpen("c", false) },
                         badges = { CountChip(std.count { on[it.id] == true }, p.amber, Color.Black) }) {
                         std.forEachIndexed { i, t -> if (i > 0) Hairline(); ToggleRow(t, on[t.id] == true, canRun, why(t)) { onToggle(t, it) } }
@@ -699,6 +773,29 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
             }
         },
         confirmButton = { TextButton(onClick = { showPicker = false }) { Text("Close") } },
+    )
+    if (showGamePicker) AlertDialog(
+        onDismissRequest = { showGamePicker = false },
+        title = { Text("Choose game") },
+        text = {
+            Column {
+                OutlinedTextField(value = gameQuery, onValueChange = { gameQuery = it }, singleLine = true,
+                    placeholder = { Text("Search") }, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth())
+                Row(Modifier.fillMaxWidth().clickable { gamesOnly = !gamesOnly }, verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = gamesOnly, onCheckedChange = { gamesOnly = it }, colors = CheckboxDefaults.colors(checkedColor = p.blue))
+                    Text("Games only", fontSize = 14.sp)
+                }
+                val shownGames = apps.filter { (l, pk) -> (!gamesOnly || pk in gamePkgs) && l.contains(gameQuery, ignoreCase = true) }
+                LazyColumn(Modifier.heightIn(max = 340.dp)) {
+                    items(shownGames, key = { it.second }) { (label, pkg) ->
+                        Text(label, Modifier.fillMaxWidth().clickable {
+                            gamePkg = pkg; gameLabel = label; saveGame(); showGamePicker = false
+                        }.padding(vertical = 12.dp), fontSize = 16.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { showGamePicker = false }) { Text("Close") } },
     )
     if (resConfirm > 0) AlertDialog(
         onDismissRequest = {},
