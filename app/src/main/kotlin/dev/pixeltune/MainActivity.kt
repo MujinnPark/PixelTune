@@ -283,7 +283,17 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
             val saved = withContext(Dispatchers.IO) {
                 LogStore.save(ctx, "pixeltune_${t.id}_$stamp.txt", buildString {
                     append("PixelTune log: ${t.title} (${if (enable) "apply" else "revert"}) $stamp\n")
-                    append("Sent ${cmds.size} command(s), skipped ${skipped.size} (notification guard)\n\n")
+                    append("Sent ${cmds.size} command(s), skipped ${skipped.size} (notification guard)\n")
+                    if (enable && r.rejected.isNotEmpty()) {
+                        val rej = r.rejected.toSet()
+                        val dc = cmds.filter { it.startsWith("device_config put ") }
+                        val accepted = dc.filter { c -> c.split(' ').let { p -> p.size >= 4 && "${p[2]}/${p[3]}" !in rej } }
+                        append("RESULT: ${accepted.size} accepted, ${rej.size} rejected by Android\n")
+                        r.reason?.let { append("Reason (first error): ").append(it).append('\n') }
+                        append("\nAccepted (accepted does NOT mean something reads the flag):\n")
+                        accepted.forEach { append(it).append('\n') }
+                    }
+                    append('\n')
                     if (skipped.isNotEmpty()) { append("Skipped:\n"); skipped.forEach { append(it).append('\n') }; append('\n') }
                     append("Commands:\n"); cmds.forEach { append(it).append('\n') }
                     if (v != null && v.total > 0) { append("\nVerification: ${v.stuck}/${v.total} settings stuck\n"); v.bad.forEach { append("NOT SET: ").append(it).append('\n') } }
@@ -299,6 +309,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
             }
             val label = when {
                 level == 2 -> "Rejected"
+                level == 1 && enable && r.failed > 0 && r.failed < cmds.size -> "Partial (${cmds.size - r.failed}/${cmds.size} accepted)"
                 level == 1 -> "Needs attention"
                 !enable -> "Reverted"
                 t.action -> "Done"

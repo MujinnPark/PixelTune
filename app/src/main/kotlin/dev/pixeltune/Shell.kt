@@ -33,6 +33,8 @@ object Shell {
         var ok = 0
         var failed = 0
         val other = mutableListOf<String>()
+        val rejected = mutableListOf<String>()
+        var reason: String? = null
         val raw = StringBuilder()
         for (batch in cmds.chunked(chunk)) {
             for (line in run(batch.joinToString("\n")).lines()) {
@@ -41,6 +43,8 @@ object Shell {
                     line.startsWith("Exception occurred while executing") -> failed++
                     line.contains("SecurityException") -> {
                         val flag = Regex("'([^']+)'").find(line)?.groupValues?.get(1) ?: line.take(120)
+                        rejected += flag
+                        if (reason == null) reason = line.trim().take(300) // first exception message, so the log says WHY
                         raw.append("REJECTED: ").append(flag).append('\n')
                     }
                     line.trimEnd().endsWith("Success") -> { ok++; raw.append(line).append('\n') }
@@ -48,8 +52,14 @@ object Shell {
                 }
             }
         }
-        return ShellResult(ok, failed, other, raw.toString())
+        return ShellResult(ok, failed, other, raw.toString(), rejected, reason)
     }
 }
 
-data class ShellResult(val ok: Int, val failed: Int, val other: List<String>, val raw: String)
+data class ShellResult(
+    val ok: Int, val failed: Int, val other: List<String>, val raw: String,
+    /** "namespace/flag" for each rejected device_config write. */
+    val rejected: List<String> = emptyList(),
+    /** First exception message seen, kept so the log explains the rejection. */
+    val reason: String? = null,
+)
