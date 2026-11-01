@@ -200,6 +200,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     var gameFps by remember { mutableIntStateOf(prefs.getInt("game_fps", 0)) }
     var gameDriver by remember { mutableStateOf(prefs.getString("game_driver", "default") ?: "default") }
     var gameTexture by remember { mutableStateOf(prefs.getString("game_texture", "normal") ?: "normal") }
+    var gameBoost by remember { mutableStateOf(prefs.getBoolean("game_boost", false)) }
     var gameOn by remember { mutableStateOf(prefs.getBoolean("game_on", false)) }
     var showGamePicker by remember { mutableStateOf(false) }
     var gameQuery by remember { mutableStateOf("") }
@@ -341,7 +342,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     }
     fun saveGame() {
         prefs.edit().putString("game_pkg", gamePkg).putString("game_label", gameLabel)
-            .putString("game_scale", gameScale).putInt("game_fps", gameFps).putString("game_driver", gameDriver).putString("game_texture", gameTexture).apply()
+            .putString("game_scale", gameScale).putInt("game_fps", gameFps).putString("game_driver", gameDriver).putString("game_texture", gameTexture).putBoolean("game_boost", gameBoost).apply()
     }
     /** Commands that give the chosen game the chosen graphics driver, keeping other apps' entries. Remembers what it replaced. */
     suspend fun angleApplyCmds(): List<String> {
@@ -374,6 +375,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
         GameProfile.angleCmds(pk, vl, pkg, prefs.getString("angle_prev", "") ?: "") + clear
     }
     fun angleDone() { prefs.edit().remove("angle_pkg").remove("angle_prev").remove("angle_tex").apply() }
+    val fixedPerfTweak = packs.firstOrNull { it.id == "fixedperf" }
     fun applyGame() {
         saveGame()
         scope.launch {
@@ -381,6 +383,9 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
             exec(GameProfile.tweak(gamePkg, gameLabel, gameScale, gameFps, extraApply = angleApplyCmds()), true)
             if (gameDriver == "default") angleDone()
             gameOn = true; prefs.edit().putBoolean("game_on", true).apply()
+            // Fixed performance mode, scoped to this game session: on with Apply, off with Reset game, so the
+            // phone doesn't run hot outside play. Only when the person turned this on and it isn't already on.
+            if (gameBoost && fixedPerfTweak != null && on[fixedPerfTweak.id] != true) exec(fixedPerfTweak, true)
             busy = false
         }
     }
@@ -390,6 +395,9 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
             exec(GameProfile.tweak(gamePkg, gameLabel, gameScale, gameFps, extraRevert = angleRevertCmds()), false)
             angleDone()
             gameOn = false; prefs.edit().putBoolean("game_on", false).apply()
+            // Only turn fixed-perf back off if this game session was the one that turned it on, so it doesn't
+            // fight the standalone toggle in Tweaks if the person also has that on by hand.
+            if (gameBoost && fixedPerfTweak != null && on[fixedPerfTweak.id] == true) exec(fixedPerfTweak, false)
             busy = false
         }
     }
@@ -492,6 +500,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                 exec(GameProfile.tweak(gamePkg, gameLabel, gameScale, gameFps, extraRevert = angleRevertCmds()), false)
                 angleDone()
                 gameOn = false; prefs.edit().putBoolean("game_on", false).apply()
+                if (gameBoost && fixedPerfTweak != null && on[fixedPerfTweak.id] == true) exec(fixedPerfTweak, false)
             }
             setScale(100)
             resScale = 100
@@ -692,6 +701,14 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                             Text("Render scale", color = p.text, fontSize = 14.sp)
                             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 GameProfile.SCALES.forEach { s -> NeuChoice(GameProfile.scaleLabel(s), gameScale == s) { gameScale = s } }
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Boost CPU/GPU while playing (risky)", color = p.text, fontSize = 14.sp)
+                                    Text("Turns on Fixed performance mode only for this session: on with Apply, off with Reset game. Runs hotter and drains battery faster; unmeasured here.",
+                                        color = p.sub, fontSize = 12.sp)
+                                }
+                                Switch(checked = gameBoost, onCheckedChange = { gameBoost = it; saveGame() }, enabled = canRun && !gameOn)
                             }
                             Text("Graphics driver (OpenGL ES games only)", color = p.text, fontSize = 14.sp)
                             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
