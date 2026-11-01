@@ -344,19 +344,6 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
         prefs.edit().putString("game_pkg", gamePkg).putString("game_label", gameLabel)
             .putString("game_scale", gameScale).putInt("game_fps", gameFps).putString("game_driver", gameDriver).putString("game_texture", gameTexture).putBoolean("game_boost", gameBoost).apply()
     }
-    /** Commands that give the chosen game the chosen graphics driver, keeping other apps' entries. Remembers what it replaced. */
-    suspend fun angleApplyCmds(): List<String> {
-        if (gameDriver == "default") return angleRevertCmds() // "Don't change" also undoes an earlier ANGLE choice for this game
-        return withContext(Dispatchers.IO) {
-            val pk = Shell.run("settings get global angle_gl_driver_selection_pkgs").trim()
-            val vl = Shell.run("settings get global angle_gl_driver_selection_values").trim()
-            // Only remember the original entry the first time; applying twice must not overwrite it with our own choice.
-            if (prefs.getString("angle_pkg", "") != gamePkg) {
-                prefs.edit().putString("angle_pkg", gamePkg).putString("angle_prev", GameProfile.driverOf(pk, vl, gamePkg)).apply()
-            }
-            GameProfile.angleCmds(pk, vl, gamePkg, gameDriver) + textureCmds()
-        }
-    }
     /** Texture preset commands. Clears the property again if an earlier Apply set it and this one doesn't. */
     fun textureCmds(): List<String> {
         val had = prefs.getBoolean("angle_tex", false)
@@ -375,6 +362,19 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
         GameProfile.angleCmds(pk, vl, pkg, prefs.getString("angle_prev", "") ?: "") + clear
     }
     fun angleDone() { prefs.edit().remove("angle_pkg").remove("angle_prev").remove("angle_tex").apply() }
+    /** Commands that give the chosen game the chosen graphics driver, keeping other apps' entries. Remembers what it replaced. */
+    suspend fun angleApplyCmds(): List<String> {
+        if (gameDriver == "default") return angleRevertCmds() // "Don't change" also undoes an earlier ANGLE choice for this game
+        return withContext(Dispatchers.IO) {
+            val pk = Shell.run("settings get global angle_gl_driver_selection_pkgs").trim()
+            val vl = Shell.run("settings get global angle_gl_driver_selection_values").trim()
+            // Only remember the original entry the first time; applying twice must not overwrite it with our own choice.
+            if (prefs.getString("angle_pkg", "") != gamePkg) {
+                prefs.edit().putString("angle_pkg", gamePkg).putString("angle_prev", GameProfile.driverOf(pk, vl, gamePkg)).apply()
+            }
+            GameProfile.angleCmds(pk, vl, gamePkg, gameDriver) + textureCmds()
+        }
+    }
     val fixedPerfTweak = packs.firstOrNull { it.id == "fixedperf" }
     fun applyGame() {
         saveGame()
