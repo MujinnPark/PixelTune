@@ -14,10 +14,46 @@ object GameProfile {
     private val PKG = Regex("^[A-Za-z0-9_.]+$")
     fun valid(pkg: String) = pkg.isNotBlank() && PKG.matches(pkg)
 
+    /** "default" = leave the graphics driver alone. The other two are values AOSP's ANGLE docs list for angle_gl_driver_selection_values. */
+    val DRIVERS = listOf("default", "angle", "native")
+    fun driverLabel(d: String) = when (d) { "angle" -> "ANGLE"; "native" -> "Native"; else -> "Don't change" }
+
+    private fun items(v: String): List<String> =
+        v.trim().let { if (it.isEmpty() || it == "null") emptyList() else it.split(',').map { s -> s.trim() } }
+
+    /** The driver currently chosen for [pkg], or "" when it has no entry. */
+    fun driverOf(pkgs: String, values: String, pkg: String): String {
+        val i = items(pkgs).indexOf(pkg)
+        return items(values).getOrNull(i) ?: ""
+    }
+
+    /**
+     * Commands that give [pkg] the driver [driver] ("" removes its entry) while keeping every other app's entry.
+     * Both lists are comma-separated and must stay the same length, one driver per package.
+     */
+    fun angleCmds(pkgs: String, values: String, pkg: String, driver: String): List<String> {
+        val p = items(pkgs); val v = items(values)
+        val n = minOf(p.size, v.size)
+        val pp = p.take(n).toMutableList(); val vv = v.take(n).toMutableList()
+        val i = pp.indexOf(pkg)
+        if (i >= 0) { pp.removeAt(i); vv.removeAt(i) }
+        if (driver.isNotEmpty()) { pp += pkg; vv += driver }
+        return if (pp.isEmpty()) listOf(
+            "settings delete global angle_gl_driver_selection_pkgs",
+            "settings delete global angle_gl_driver_selection_values",
+        ) else listOf(
+            "settings put global angle_gl_driver_selection_pkgs ${pp.joinToString(",")}",
+            "settings put global angle_gl_driver_selection_values ${vv.joinToString(",")}",
+        )
+    }
+
     fun scaleLabel(s: String) = if (s == "disable") "Off" else "${Math.round(s.toFloat() * 100)}%"
 
     /** Apply = performance mode plus the interventions; revert = clear the overrides and go back to standard mode. */
-    fun tweak(pkg: String, label: String, scale: String, fps: Int): Tweak {
+    fun tweak(
+        pkg: String, label: String, scale: String, fps: Int,
+        extraApply: List<String> = emptyList(), extraRevert: List<String> = emptyList(),
+    ): Tweak {
         val set = buildString {
             append("cmd game set --mode 2")
             if (scale != "disable") append(" --downscale ").append(scale)
@@ -26,8 +62,8 @@ object GameProfile {
         }
         return Tweak(
             id = "gameprof", title = "Game profile: $label", desc = "",
-            apply = listOf("cmd game mode performance $pkg", set),
-            revert = listOf("cmd game reset $pkg", "cmd game mode standard $pkg"),
+            apply = listOf("cmd game mode performance $pkg", set) + extraApply,
+            revert = listOf("cmd game reset $pkg", "cmd game mode standard $pkg") + extraRevert,
             action = true,
         )
     }

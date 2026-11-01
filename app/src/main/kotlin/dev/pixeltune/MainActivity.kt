@@ -198,6 +198,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     var gameLabel by remember { mutableStateOf(prefs.getString("game_label", "") ?: "") }
     var gameScale by remember { mutableStateOf(prefs.getString("game_scale", "0.8") ?: "0.8") }
     var gameFps by remember { mutableIntStateOf(prefs.getInt("game_fps", 0)) }
+    var gameDriver by remember { mutableStateOf(prefs.getString("game_driver", "default") ?: "default") }
     var gameOn by remember { mutableStateOf(prefs.getBoolean("game_on", false)) }
     var showGamePicker by remember { mutableStateOf(false) }
     var gameQuery by remember { mutableStateOf("") }
@@ -339,13 +340,36 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     }
     fun saveGame() {
         prefs.edit().putString("game_pkg", gamePkg).putString("game_label", gameLabel)
-            .putString("game_scale", gameScale).putInt("game_fps", gameFps).apply()
+            .putString("game_scale", gameScale).putInt("game_fps", gameFps).putString("game_driver", gameDriver).apply()
     }
+    /** Commands that give the chosen game the chosen graphics driver, keeping other apps' entries. Remembers what it replaced. */
+    suspend fun angleApplyCmds(): List<String> {
+        if (gameDriver == "default") return angleRevertCmds() // "Don't change" also undoes an earlier ANGLE choice for this game
+        return withContext(Dispatchers.IO) {
+            val pk = Shell.run("settings get global angle_gl_driver_selection_pkgs").trim()
+            val vl = Shell.run("settings get global angle_gl_driver_selection_values").trim()
+            // Only remember the original entry the first time; applying twice must not overwrite it with our own choice.
+            if (prefs.getString("angle_pkg", "") != gamePkg) {
+                prefs.edit().putString("angle_pkg", gamePkg).putString("angle_prev", GameProfile.driverOf(pk, vl, gamePkg)).apply()
+            }
+            GameProfile.angleCmds(pk, vl, gamePkg, gameDriver)
+        }
+    }
+    /** Puts back the driver entry the game had before PixelTune changed it. Empty if PixelTune never changed it. */
+    suspend fun angleRevertCmds(): List<String> = withContext(Dispatchers.IO) {
+        val pkg = prefs.getString("angle_pkg", "") ?: ""
+        if (pkg.isBlank()) return@withContext emptyList()
+        val pk = Shell.run("settings get global angle_gl_driver_selection_pkgs").trim()
+        val vl = Shell.run("settings get global angle_gl_driver_selection_values").trim()
+        GameProfile.angleCmds(pk, vl, pkg, prefs.getString("angle_prev", "") ?: "")
+    }
+    fun angleDone() { prefs.edit().remove("angle_pkg").remove("angle_prev").apply() }
     fun applyGame() {
         saveGame()
         scope.launch {
             busy = true
-            exec(GameProfile.tweak(gamePkg, gameLabel, gameScale, gameFps), true)
+            exec(GameProfile.tweak(gamePkg, gameLabel, gameScale, gameFps, extraApply = angleApplyCmds()), true)
+            if (gameDriver == "default") angleDone()
             gameOn = true; prefs.edit().putBoolean("game_on", true).apply()
             busy = false
         }
@@ -353,7 +377,8 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     fun resetGame() {
         scope.launch {
             busy = true
-            exec(GameProfile.tweak(gamePkg, gameLabel, gameScale, gameFps), false)
+            exec(GameProfile.tweak(gamePkg, gameLabel, gameScale, gameFps, extraRevert = angleRevertCmds()), false)
+            angleDone()
             gameOn = false; prefs.edit().putBoolean("game_on", false).apply()
             busy = false
         }
@@ -372,6 +397,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                 LogStore.save(ctx, "pixeltune_fps_$fpsStamp.txt", buildString {
                     append("PixelTune log: Game FPS $gameLabel ($gamePkg) $fpsStamp\n")
                     append("FPS: ${fps ?: "no reading"}\n")
+                    append("Graphics driver setting: ${GameProfile.driverLabel(gameDriver)}\n")
                     append("Tweaks on: $tweaksOn\n\n")
                     append("Raw:\n").append(r?.excerpt ?: "The sampling command failed.").append('\n')
                 })
@@ -451,7 +477,8 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
             (toggles + packs).forEach { exec(it, false) }
             if (alive.isNotEmpty()) exec(aliveTweak(), false)
             if (prefs.getBoolean("game_on", false) && GameProfile.valid(gamePkg)) {
-                exec(GameProfile.tweak(gamePkg, gameLabel, gameScale, gameFps), false)
+                exec(GameProfile.tweak(gamePkg, gameLabel, gameScale, gameFps, extraRevert = angleRevertCmds()), false)
+                angleDone()
                 gameOn = false; prefs.edit().putBoolean("game_on", false).apply()
             }
             setScale(100)
@@ -654,6 +681,15 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 GameProfile.SCALES.forEach { s -> NeuChoice(GameProfile.scaleLabel(s), gameScale == s) { gameScale = s } }
                             }
+                            Text("Graphics driver (OpenGL ES games only)", color = p.text, fontSize = 14.sp)
+                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                GameProfile.DRIVERS.forEach { d -> NeuChoice(GameProfile.driverLabel(d), gameDriver == d) { gameDriver = d } }
+                            }
+                            if (gameDriver != "default") Text(
+                                "Sets Android's per-app driver choice (ANGLE runs OpenGL ES on top of Vulkan). It does nothing for a game that already uses Vulkan, " +
+                                    "and it only takes effect when the game starts, so force-stop and reopen the game after Apply. Not shown to raise FPS: compare with Measure FPS. " +
+                                    "It stays set across reboots until you tap Reset game.",
+                                color = p.sub, fontSize = 12.sp)
                             Text("FPS cap", color = p.text, fontSize = 14.sp)
                             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 GameProfile.FPS.forEach { f -> NeuChoice(if (f == 0) "Off" else "$f", gameFps == f) { gameFps = f } }
