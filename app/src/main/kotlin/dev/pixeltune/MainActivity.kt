@@ -199,6 +199,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     var gameScale by remember { mutableStateOf(prefs.getString("game_scale", "0.8") ?: "0.8") }
     var gameFps by remember { mutableIntStateOf(prefs.getInt("game_fps", 0)) }
     var gameDriver by remember { mutableStateOf(prefs.getString("game_driver", "default") ?: "default") }
+    var gameTexture by remember { mutableStateOf(prefs.getString("game_texture", "normal") ?: "normal") }
     var gameOn by remember { mutableStateOf(prefs.getBoolean("game_on", false)) }
     var showGamePicker by remember { mutableStateOf(false) }
     var gameQuery by remember { mutableStateOf("") }
@@ -340,7 +341,7 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
     }
     fun saveGame() {
         prefs.edit().putString("game_pkg", gamePkg).putString("game_label", gameLabel)
-            .putString("game_scale", gameScale).putInt("game_fps", gameFps).putString("game_driver", gameDriver).apply()
+            .putString("game_scale", gameScale).putInt("game_fps", gameFps).putString("game_driver", gameDriver).putString("game_texture", gameTexture).apply()
     }
     /** Commands that give the chosen game the chosen graphics driver, keeping other apps' entries. Remembers what it replaced. */
     suspend fun angleApplyCmds(): List<String> {
@@ -352,18 +353,27 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
             if (prefs.getString("angle_pkg", "") != gamePkg) {
                 prefs.edit().putString("angle_pkg", gamePkg).putString("angle_prev", GameProfile.driverOf(pk, vl, gamePkg)).apply()
             }
-            GameProfile.angleCmds(pk, vl, gamePkg, gameDriver)
+            GameProfile.angleCmds(pk, vl, gamePkg, gameDriver) + textureCmds()
         }
+    }
+    /** Texture preset commands. Clears the property again if an earlier Apply set it and this one doesn't. */
+    fun textureCmds(): List<String> {
+        val had = prefs.getBoolean("angle_tex", false)
+        val want = GameProfile.textureCmds(gameTexture)
+        prefs.edit().putBoolean("angle_tex", want.isNotEmpty()).apply()
+        return if (want.isNotEmpty()) want else if (had) GameProfile.TEXTURE_CLEAR else emptyList()
     }
     /** Puts back the driver entry the game had before PixelTune changed it. Empty if PixelTune never changed it. */
     suspend fun angleRevertCmds(): List<String> = withContext(Dispatchers.IO) {
+        // Only clear the property if PixelTune set it; the user may have set it by hand for something else.
+        val clear = if (prefs.getBoolean("angle_tex", false)) GameProfile.TEXTURE_CLEAR else emptyList()
         val pkg = prefs.getString("angle_pkg", "") ?: ""
-        if (pkg.isBlank()) return@withContext emptyList()
+        if (pkg.isBlank()) return@withContext clear
         val pk = Shell.run("settings get global angle_gl_driver_selection_pkgs").trim()
         val vl = Shell.run("settings get global angle_gl_driver_selection_values").trim()
-        GameProfile.angleCmds(pk, vl, pkg, prefs.getString("angle_prev", "") ?: "")
+        GameProfile.angleCmds(pk, vl, pkg, prefs.getString("angle_prev", "") ?: "") + clear
     }
-    fun angleDone() { prefs.edit().remove("angle_pkg").remove("angle_prev").apply() }
+    fun angleDone() { prefs.edit().remove("angle_pkg").remove("angle_prev").remove("angle_tex").apply() }
     fun applyGame() {
         saveGame()
         scope.launch {
@@ -398,6 +408,8 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                     append("PixelTune log: Game FPS $gameLabel ($gamePkg) $fpsStamp\n")
                     append("FPS: ${fps ?: "no reading"}\n")
                     append("Graphics driver setting: ${GameProfile.driverLabel(gameDriver)}\n")
+                    append("Texture preset: ${GameProfile.textureLabel(gameTexture)}\n")
+                    append("ANGLE overrides property now: ${runCatching { GameProfile.featureProp() }.getOrDefault("unreadable").ifBlank { "(empty)" }}\n")
                     append("Tweaks on: $tweaksOn\n\n")
                     append("Raw:\n").append(r?.excerpt ?: "The sampling command failed.").append('\n')
                 })
@@ -683,12 +695,22 @@ private fun Body(status: Int, hz: Int, actions: List<Tweak>, toggles: List<Tweak
                             }
                             Text("Graphics driver (OpenGL ES games only)", color = p.text, fontSize = 14.sp)
                             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                GameProfile.DRIVERS.forEach { d -> NeuChoice(GameProfile.driverLabel(d), gameDriver == d) { gameDriver = d } }
+                                GameProfile.DRIVERS.forEach { d -> NeuChoice(GameProfile.driverLabel(d), gameDriver == d) { gameDriver = d; if (d != "angle") gameTexture = "normal" } }
                             }
                             if (gameDriver != "default") Text(
                                 "Sets Android's per-app driver choice (ANGLE runs OpenGL ES on top of Vulkan). It does nothing for a game that already uses Vulkan, " +
                                     "and it only takes effect when the game starts, so force-stop and reopen the game after Apply. Not shown to raise FPS: compare with Measure FPS. " +
                                     "It stays set across reboots until you tap Reset game.",
+                                color = p.sub, fontSize = 12.sp)
+                            Text("Texture quality (needs ANGLE)", color = p.text, fontSize = 14.sp)
+                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                GameProfile.TEXTURES.forEach { t -> NeuChoice(GameProfile.textureLabel(t), gameTexture == t) { gameTexture = t; if (t != "normal") gameDriver = "angle" } }
+                            }
+                            if (gameTexture != "normal") Text(
+                                "Uses ANGLE debug features (anisotropic filtering off, texture detail pushed down" +
+                                    (if (gameTexture == "blocky") ", nearest-neighbour sampling" else "") + "), so choosing it switches the driver to ANGLE. " +
+                                    "Textures get blurrier or blockier. The setting applies system-wide to apps using ANGLE until you reset or reboot, " +
+                                    "and only when the game next starts. Speed gain unmeasured. Some games' rules forbid changing visuals this way.",
                                 color = p.sub, fontSize = 12.sp)
                             Text("FPS cap", color = p.text, fontSize = 14.sp)
                             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {

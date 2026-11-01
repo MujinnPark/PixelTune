@@ -18,6 +18,25 @@ object GameProfile {
     val DRIVERS = listOf("default", "angle", "native")
     fun driverLabel(d: String) = when (d) { "angle" -> "ANGLE"; "native" -> "Native"; else -> "Don't change" }
 
+    /**
+     * Texture presets use ANGLE's own debug features (named in ANGLE's feature list, described there as "for performance
+     * comparisons" and non-conformant). They only take effect when the game runs on ANGLE. The property is read when the app
+     * starts and is cleared by a reboot.
+     */
+    val TEXTURES = listOf("normal", "low", "blocky")
+    fun textureLabel(t: String) = when (t) { "low" -> "Low (blurry)"; "blocky" -> "Blocky"; else -> "Normal" }
+    private const val FEATURE_PROP = "debug.angle.feature_overrides_enabled"
+    val TEXTURE_CLEAR = listOf("setprop $FEATURE_PROP ''")
+    fun textureCmds(t: String): List<String> {
+        val features = when (t) {
+            "low" -> "disableAnisotropicFiltering:forceTextureLodOffset4"
+            "blocky" -> "forceNearestFiltering:disableAnisotropicFiltering:forceTextureLodOffset4"
+            else -> return emptyList()
+        }
+        return listOf("setprop $FEATURE_PROP $features")
+    }
+    fun featureProp() = Shell.run("getprop $FEATURE_PROP")
+
     private fun items(v: String): List<String> =
         v.trim().let { if (it.isEmpty() || it == "null") emptyList() else it.split(',').map { s -> s.trim() } }
 
